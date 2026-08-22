@@ -143,10 +143,10 @@ switch $_subcmd
     case sync
         # sync accepts all the configured flags; nothing to reject.
     case merge
-        # merge accepts --force (bypasses .merge-skip). Reject everything else.
+        # merge accepts --force (bypasses .merge-skip) and --dry-run (preview
+        # what would be adopted, change nothing). Reject everything else.
         # --verbose is rejected on merge: merge already prints ignore-match
         # info unconditionally, so the flag would be a confusing no-op.
-        set -q _flag_dry_run;          and _wrangle_reject_flag merge --dry-run
         set -q _flag_verbose;          and _wrangle_reject_flag merge --verbose
         set -q _flag_with_claude;      and _wrangle_reject_flag merge --with-claude
         set -q _flag_suppress_claude;  and _wrangle_reject_flag merge --suppress-claude
@@ -229,7 +229,7 @@ function _wrangle_help_update
 end
 
 function _wrangle_help_merge
-    echo "Usage: wrangle merge <branch> [-f|--force]"
+    echo "Usage: wrangle merge <branch> [-d|--dry-run] [-f|--force]"
     echo ""
     echo "Per-item adoption of personal-layer content from another machine-branch."
     echo "Walks dotfiles + Brewfile + fish_plugins + univ-vars, comparing the"
@@ -248,7 +248,12 @@ function _wrangle_help_merge
     echo ""
     echo "Source resolves to origin/<branch> if it exists; otherwise local."
     echo ""
+    echo "With --dry-run, merge walks the same domains and prints the per-item"
+    echo "list it would prompt on (new items and content conflicts) plus a count"
+    echo "summary, then stops — no adoptions, no re-stow, no commit."
+    echo ""
     echo "Options:"
+    echo "  -d, --dry-run  preview what would be adopted; change nothing, don't commit"
     echo "  -f, --force    bypass .merge-skip (re-prompt items previously marked skip [f]orever)"
 end
 
@@ -873,6 +878,9 @@ if test "$_subcmd" = merge
 
     _header "Merge from $source"
     echo "  $GLYPH_DIM source: "(_name $source)" → current: "(_name $current)
+    if test "$_dry_run" = yes
+        echo "  $GLYPH_DIM dry run — previewing what would be adopted; nothing will change"
+    end
     echo ""
 
     # Load current branch's ignore lists (skiplist module exposes the loader).
@@ -949,6 +957,10 @@ if test "$_subcmd" = merge
             # New file: prompt to adopt, skip once, or skip forever.
             echo ""
             echo "    "(_name $path)" (new from source)"
+            if test "$_dry_run" = yes
+                set dot_total (math $dot_total + 1)
+                continue
+            end
             while true
                 read -P (_keys "    [a]dopt / skip [f]orever / [s]kip / [q]uit > ") choice
                 switch $choice
@@ -979,6 +991,10 @@ if test "$_subcmd" = merge
             # Conflict: prompt with 4 options.
             echo ""
             echo "    "(_name $path)" (differs from source)"
+            if test "$_dry_run" = yes
+                set dot_total (math $dot_total + 1)
+                continue
+            end
             while true
                 read -P (_keys "    [a]dopt source / [k]eep mine / [d]iff / [s]kip / [q]uit > ") choice
                 switch $choice
@@ -1041,6 +1057,10 @@ if test "$_subcmd" = merge
 
         echo ""
         echo "    "(_name $line)
+        if test "$_dry_run" = yes
+            set brew_total (math $brew_total + 1)
+            continue
+        end
         while true
             read -P (_keys "    [a]dopt (append + brew install) / skip [f]orever / [s]kip / [q]uit > ") choice
             switch $choice
@@ -1099,6 +1119,10 @@ if test "$_subcmd" = merge
 
         echo ""
         echo "    "(_name $plugin)
+        if test "$_dry_run" = yes
+            set fisher_total (math $fisher_total + 1)
+            continue
+        end
         while true
             read -P (_keys "    [a]dopt (append + fisher install) / skip [f]orever / [s]kip / [q]uit > ") choice
             switch $choice
@@ -1158,6 +1182,10 @@ if test "$_subcmd" = merge
 
         echo ""
         echo "    "(_name $pat)" (new pattern from source)"
+        if test "$_dry_run" = yes
+            set univ_total (math $univ_total + 1)
+            continue
+        end
         while true
             read -P (_keys "    [a]dopt (append + apply matching vars) / skip [f]orever / [s]kip / [q]uit > ") choice
             switch $choice
@@ -1200,6 +1228,23 @@ if test "$_subcmd" = merge
     end
     if test $univ_total -eq 0
         echo "    $GLYPH_OK no univ-var pattern drift to merge"
+    end
+
+    # ── Dry run: report what WOULD be adopted, then stop (no writes) ────
+    if test "$_dry_run" = yes
+        set -l cand_total (math $dot_total + $brew_total + $fisher_total + $univ_total)
+        echo ""
+        _header "Dry run — nothing changed"
+        if test $cand_total -eq 0
+            echo "  $GLYPH_OK nothing to adopt from $source — current branch is already caught up"
+        else
+            echo "  $GLYPH_DIM would prompt to adopt from "(_name $source)":"
+            echo "    "(_n $dot_total)" dotfile(s), "(_n $brew_total)" brew(s), "(_n $fisher_total)" fisher plugin(s), "(_n $univ_total)" univ-var pattern(s)"
+            echo ""
+            echo "  Run "(_name "wrangle merge $src_arg")" (without --dry-run) to adopt interactively."
+        end
+        popd >/dev/null
+        exit 0
     end
 
     # ── Post-merge: re-stow if any new dotfiles, regenerate univ-vars file if changed ──

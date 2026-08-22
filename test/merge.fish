@@ -244,3 +244,76 @@ not grep -q 'matches .merge-skip' $home7/merge3.log
 @test "[f]orever + --force: no 'matches .merge-skip' info (bypassed)" $status -eq 0
 
 rm -rf $fix7 $home7 $stubdir7
+
+# ─── --dry-run: previews candidates, mutates nothing, makes no commit ───
+#
+# The whole point of dry-run is that it walks the SAME domains as a real
+# merge (so the preview never lies) but changes nothing. No input is piped:
+# dry-run must not read a single prompt. `</dev/null` guarantees that a
+# regression which fell through to a prompt gets EOF and fails fast instead
+# of hanging the suite.
+
+set -l f8 (_wrangle_merge_fixture)
+set -l fix8 $f8[1]; set -l home8 $f8[2]
+set -l before_head8 (git -C $fix8 rev-parse personal)
+
+set -l dry_rv
+begin
+    set -lx HOME $home8
+    $fix8/scripts/wrangle merge work --dry-run </dev/null >$home8/dry.log 2>&1
+    set dry_rv $status
+end
+@test "merge --dry-run exits 0" $dry_rv -eq 0
+
+# No commit landed on personal.
+set -l after_head8 (git -C $fix8 rev-parse personal)
+test "$before_head8" = "$after_head8"
+@test "merge --dry-run: no commit on personal" $status -eq 0
+
+# No files were mutated: work's extras did NOT land on personal.
+not grep -q 'mergiraf' $fix8/Brewfile
+@test "merge --dry-run: Brewfile NOT modified" $status -eq 0
+not grep -q 'fzf.fish' $fix8/home/.config/fish/fish_plugins
+@test "merge --dry-run: fish_plugins NOT modified" $status -eq 0
+not test -f $fix8/home/.config/zed/settings.json
+@test "merge --dry-run: new dotfile NOT written" $status -eq 0
+not test -f $fix8/.merge-skip
+@test "merge --dry-run: .merge-skip NOT written" $status -eq 0
+
+# The preview surfaced each candidate (dotfile, brew, fisher).
+grep -q 'settings.json' $home8/dry.log
+@test "merge --dry-run: previews the new dotfile" $status -eq 0
+grep -q 'mergiraf' $home8/dry.log
+@test "merge --dry-run: previews the new brew" $status -eq 0
+grep -q 'PatrickF1/fzf.fish' $home8/dry.log
+@test "merge --dry-run: previews the new fisher plugin" $status -eq 0
+
+# The dry-run banner + summary appear, and the summary counts the candidates.
+# The summary numbers are bold (via _n), so strip ANSI before matching the
+# count line — the escape codes sit between each digit and its word.
+cat $home8/dry.log | string replace -ra '\e\[[0-9;]*m' '' > $home8/dry.txt
+grep -q 'dry run' $home8/dry.txt
+@test "merge --dry-run: prints the dry-run banner" $status -eq 0
+grep -qE '1 dotfile\(s\), 1 brew\(s\), 1 fisher plugin\(s\), 0 univ-var' $home8/dry.txt
+@test "merge --dry-run: summary counts candidates per domain" $status -eq 0
+grep -qE 'without .*--dry-run' $home8/dry.txt
+@test "merge --dry-run: points at the real merge to adopt" $status -eq 0
+
+rm -rf $fix8 $home8
+
+# ─── --dry-run honors ignore files (preview matches the real walk) ─────
+
+set -l f9 (_wrangle_merge_fixture)
+set -l fix9 $f9[1]; set -l home9 $f9[2]
+echo 'mergiraf' >> $fix9/.brewignore
+git -C $fix9 commit -q -am 'personal: brewignore mergiraf'
+begin
+    set -lx HOME $home9
+    $fix9/scripts/wrangle merge work --dry-run </dev/null >$home9/dry.log 2>&1
+end
+cat $home9/dry.log | string replace -ra '\e\[[0-9;]*m' '' > $home9/dry.txt
+grep -q 'matches .brewignore' $home9/dry.txt
+@test "merge --dry-run: honors .brewignore in the preview" $status -eq 0
+grep -qE '0 brew\(s\)' $home9/dry.txt
+@test "merge --dry-run: ignored brew is not counted as a candidate" $status -eq 0
+rm -rf $fix9 $home9
