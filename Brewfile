@@ -131,3 +131,5 @@ brew "python@3.12"
 cask "helium-browser"
 # JDK from the Eclipse Foundation (Adoptium)
 cask "temurin@17"
+# Polyglot runtime manager (asdf rust clone)
+brew "mise"

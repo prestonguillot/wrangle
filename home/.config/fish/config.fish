@@ -14,6 +14,11 @@ set -g history_max_size 2000
 fish_add_path --path --global --prepend $HOME/bin
 fish_add_path --path --global --append  $HOME/.local/bin /sbin /usr/sbin
 
+# mise shims: needed by non-interactive tools that inherit this PATH but never run
+# `mise activate` -- git hooks (lefthook), IDE run configs, anything spawned by a GUI app.
+# Prepended so mise wins over a stray system node (e.g. /usr/local/bin).
+fish_add_path --path --global --prepend $HOME/.local/share/mise/shims
+
 # ── Env exports ───────────────────────────────────────────────────────────
 # Suppress venv's `(venvname)` prompt prefix — tide already shows the venv.
 set -gx VIRTUAL_ENV_DISABLE_PROMPT 1
