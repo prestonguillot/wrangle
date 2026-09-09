@@ -69,6 +69,7 @@ id_*                    # SSH keys via the conventional naming
 .rd                     # Rancher Desktop per-machine state
 .rustup                 # rustup toolchain installs
 .tldrc                  # tldr's offline page cache
+.homebrew               # Homebrew trust-store lock (brew trust/untrust)
 
 # ─── Editor/backup file globs ────────────────────────────────────────────
 .zcompdump*             # zsh completion cache

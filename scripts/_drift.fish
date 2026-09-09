@@ -95,25 +95,89 @@ function _wrangle_detect_drift --argument-names mode
         echo ""
     end
 
+    # Move a path into home/ and let stow link it back. Transactional: every
+    # check that can refuse runs BEFORE the mv, and a stow failure undoes the
+    # mv rather than leaving the path stranded in the repo.
+    #
+    # Return codes matter to the caller:
+    #   0  tracked
+    #   1  refused or rolled back — nothing moved, safe to continue
+    #   2  moved but NOT restored — the user must intervene
+    #
+    # The previous version ended both branches of its if/else in `echo`, so it
+    # always returned 0. A stow failure was still counted as a track, still
+    # logged as a change, and still fed to the changelog and commit passes —
+    # which is how a run that broke a home directory reported "4 tracked".
     function _track --inherit-variable home_subdir --inherit-variable repo
         set -l rel $argv[1]
         set -l src $HOME/$rel
         set -l dest $home_subdir/$rel
+
+        # Refuse before mutating. The enumeration already filters these out;
+        # this is here because _track has to be safe for any caller, not
+        # because the check is expected to fire.
+        set -l hazards (_wrangle_stow_hazards $src)
+        if test (count $hazards) -gt 0
+            echo "      $GLYPH_ERR cannot track "(_name "~/$rel")" — stow cannot manage it:"
+            _wrangle_stow_hazard_report "        " $hazards
+            return 1
+        end
+
+        # mv onto an existing path either clobbers a file or, for a directory,
+        # buries the source inside it as home/<rel>/<basename>.
+        if test -e $dest; or test -L $dest
+            echo "      $GLYPH_ERR cannot track "(_name "~/$rel")" — "(_name "home/$rel")" already exists."
+            echo "        Nothing was moved. Resolve that path in the repo, then re-run."
+            return 1
+        end
+
         mkdir -p (dirname $dest)
         mv $src $dest
         or begin
-            echo "      $GLYPH_ERR mv failed; aborting track"
+            echo "      $GLYPH_ERR mv failed; nothing was moved"
             return 1
         end
-        pushd $repo >/dev/null
-        _with_spinner "Re-stowing after track…" stow --no-folding -R -t ~ home
-        set -l rv $status
-        popd >/dev/null
-        if test $rv -eq 0
+
+        if _wrangle_stow_run "Re-stowing after track…" $repo
             echo "      $GLYPH_OK moved to home/$rel + symlinked back to ~/$rel"
-        else
-            echo "      $GLYPH_WARN moved but stow failed; resolve before committing"
+            return 0
         end
+
+        # stow collects conflicts during planning and aborts before touching
+        # the filesystem, so the mv above is the only thing to undo.
+        set -l stow_err $_wrangle_stow_err
+        if not mv $dest $src
+            echo ""
+            echo "$GLYPH_ERR STOW FAILED AND ROLLBACK FAILED — MANUAL RECOVERY NEEDED:"
+            echo "    "(_name "~/$rel")" is now at"
+            echo "      "(_name $dest)
+            echo "    and is NOT present at "(_name $src)
+            echo ""
+            echo "  Restore it by hand:"
+            echo "    mv '$dest' '$src'"
+            return 2
+        end
+
+        # The mv is undone. If home/ still won't stow, the package was already
+        # broken before this track — a different problem with a different fix,
+        # and worth saying so rather than blaming the path the user just picked.
+        set -l pre_existing no
+        _wrangle_stow_run "Checking home/ after rollback…" $repo
+        or set pre_existing yes
+
+        echo ""
+        echo "$GLYPH_ERR STOW REFUSED — rolled back, nothing was moved:"
+        _wrangle_stow_explain_failure "    " $stow_err
+        echo ""
+        echo "  "(_name "~/$rel")" is back where it was and is unchanged."
+        if test "$pre_existing" = yes
+            echo "  home/ still would not stow after the rollback, so something already"
+            echo "  tracked is the cause, not "(_name "~/$rel")"."
+            echo "  Run "(_name "wrangle repair")" to find and fix it."
+        else
+            echo "  Add it to .dotignore, or fix the path named above, then re-run."
+        end
+        return 1
     end
 
     function _add_ignore --inherit-variable ignore_file
@@ -124,18 +188,24 @@ function _wrangle_detect_drift --argument-names mode
     # ─── Pass 5: dotfile drift ───────────────────────────────────────────────
     echo ""
     _header "Dotfile drift"
-    set -l candidates
-    for f in $HOME/.[A-Za-z0-9]*
-        test -L $f; and continue
-        set -l rel (string replace -- $HOME/ "" $f)
-        if _is_skipped $rel
-            test "$_verbose" = yes; and echo "  $GLYPH_DIM skipping "(_name $rel)" (matches .dotignore)"
-            continue
-        end
-        _is_tracked $rel; and continue
-        set -a candidates $rel
+    # Build the scan list. fish has no bracket globs, so the previous
+    # `$HOME/.[A-Za-z0-9]*` matched nothing and top-level dotfiles were never
+    # scanned at all — even though .dotignore is written almost entirely
+    # around them (.aws, .ssh, .gnupg, .bash_history…). `.*` is the working
+    # glob (fish already excludes `.` and `..`); the "second character is
+    # alphanumeric" rule the old pattern reached for is applied explicitly.
+    set -l scan
+    for f in $HOME/.*
+        string match -qr '^\.[A-Za-z0-9]' -- (string replace -- $HOME/ "" $f); or continue
+        set -a scan $f
     end
     for f in $HOME/.config/*
+        set -a scan $f
+    end
+
+    set -l candidates
+    set -l blocked
+    for f in $scan
         test -L $f; and continue
         set -l rel (string replace -- $HOME/ "" $f)
         if _is_skipped $rel
@@ -143,22 +213,68 @@ function _wrangle_detect_drift --argument-names mode
             continue
         end
         _is_tracked $rel; and continue
-        set -a candidates $rel
+        # The candidate not being a symlink says nothing about what is inside
+        # it. The path that broke a user's home directory was a real directory
+        # holding an absolute symlink two levels down, which stow refuses —
+        # and one such symlink blocks every file in home/, not just its own.
+        if test (count (_wrangle_stow_hazards $f)) -gt 0
+            set -a blocked $rel
+        else
+            set -a candidates $rel
+        end
     end
 
-    if test (count $candidates) -eq 0
+    if test (count $candidates) -eq 0; and test (count $blocked) -eq 0
         echo "  $GLYPH_OK no untracked dotfiles in scope"
     else
         set -l mode_hint
         test "$mode" = report; and set mode_hint " (dry run — no prompts)"
         test "$_force" = yes; and set mode_hint "$mode_hint (--force: ignore list bypassed)"
-        echo "  Found "(_n (count $candidates))" untracked path(s)$mode_hint."
+        if test (count $candidates) -gt 0
+            echo "  Found "(_n (count $candidates))" untracked path(s)$mode_hint."
+        end
+        if test (count $blocked) -gt 0
+            echo "  Found "(_n (count $blocked))" path(s) stow cannot manage — reported below, not touched."
+        end
     end
 
     set -l tracked_count 0
     set -l ignored_count 0
 
+    # Paths stow cannot manage: reported, never touched. No mv, no stow, and
+    # no [t]rack option — offering a choice that cannot work is the bug.
+    # [i]gnore and [s]kip remain, so the user can silence it without wrangle
+    # ever moving anything out of ~.
+    for rel in $blocked
+        _show $rel
+        echo "    $GLYPH_ERR can't be tracked — stow cannot manage this path"
+        _wrangle_stow_hazard_report "      " (_wrangle_stow_hazards $HOME/$rel)
+        if test "$mode" = report
+            continue
+        end
+        while true
+            read -P (_keys "    [i]gnore forever / [s]kip / [q]uit > ") choice
+            switch $choice
+                case i I ignore
+                    _add_ignore $rel
+                    set ignored_count (math $ignored_count + 1)
+                    _log_change "ignored dotfile: $rel"
+                    break
+                case s S skip ''
+                    echo "      $GLYPH_DIM skipped (will ask again next run)"
+                    break
+                case q Q quit
+                    _wrangle_abort quit
+                case '*'
+                    echo "      ? '$choice' — answer i/s/q"
+            end
+        end
+    end
+
+    set -l stow_broken no
+    set -l seen 0
     for rel in $candidates
+        set seen (math $seen + 1)
         _show $rel
         if test "$mode" = report
             continue
@@ -168,9 +284,17 @@ function _wrangle_detect_drift --argument-names mode
             read -P (_keys "    [t]rack / [i]gnore forever / [s]kip / [q]uit > ") choice
             switch $choice
                 case t T track
-                    if _track $rel
+                    _track $rel
+                    set -l rv $status
+                    if test $rv -eq 0
                         set tracked_count (math $tracked_count + 1)
                         _log_change "tracked dotfile: $rel"
+                    else if test $rv -eq 2
+                        # A path is in the repo and gone from ~. Anything we do
+                        # next writes on top of a broken home directory.
+                        exit 1
+                    else
+                        set stow_broken yes
                     end
                     break
                 case i I ignore
@@ -186,6 +310,20 @@ function _wrangle_detect_drift --argument-names mode
                 case '*'
                     echo "      ? '$choice' — answer t/i/s/q"
             end
+        end
+
+        # home/ is one stow package: if it won't stow now, it won't stow for
+        # the next path either, and each attempt moves another directory out
+        # of ~ before finding that out. That cascade is what turned one bad
+        # symlink into three stranded directories.
+        if test "$stow_broken" = yes
+            set -l left (math (count $candidates) - $seen)
+            echo ""
+            echo "  $GLYPH_WARN stopping the dotfile pass — home/ will not stow right now."
+            if test $left -gt 0
+                echo "    "(_n $left)" remaining path(s) were left untouched in ~."
+            end
+            break
         end
     end
 

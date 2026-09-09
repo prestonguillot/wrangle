@@ -45,7 +45,7 @@ When bootstrap hands off, you're in interactive `wrangle`. What you'll see:
 - A one-time question asking whether to enable claude-code doc review.
 - A pre-stow integrity check for yoinked or orphaned dotfile symlinks.
 - A re-stow.
-- A dotfile-drift pass: walks top-level entries in `~/` and `~/.config/` that aren't tracked. For each: `[t]rack` (moves into `home/`, symlinks back), `[i]gnore forever` (writes to `.dotignore`), `[s]kip`, `[q]uit`.
+- A dotfile-drift pass: walks top-level entries in `~/` and `~/.config/` that aren't tracked. For each: `[t]rack` (moves into `home/`, symlinks back), `[i]gnore forever` (writes to `.dotignore`), `[s]kip`, `[q]uit`. Paths stow can't store — a symlink to an absolute path, a symlink pointing outside the tracked path, or a socket/pipe/device file — are reported and left alone; they get `[i]gnore forever` / `[s]kip` / `[q]uit` but no `[t]rack`.
 - A fisher-plugin drift pass: installed plugins not in `fish_plugins`, and vice versa.
 - A univ-var drift pass with two sub-passes. **Import**: if `exported-univ-vars.fish` exists, applies any tracked vars missing from your live shell silently; prompts `[a]pply / [k]eep local / [s]kip / [q]uit` per var when live and repo values differ. **Capture**: groups remaining (untracked) live universals by prefix; `[t]rack pattern` adds e.g. `tide_*` to `.univexport` and regenerates `exported-univ-vars.fish`; `[i]gnore forever` adds the pattern to `.univignore`.
 - A brew-drift pass: installed brews/casks/MAS apps not in `Brewfile`, and vice versa.
@@ -66,6 +66,7 @@ Five subcommands cover the everyday loop:
 
 - `wrangle sync` — the main one: detect drift across all domains, prompt per-item, commit, optionally push.
 - `wrangle update` — fetch origin and merge `origin/main` into your machine-branch (framework updates).
+- `wrangle repair` — recover a `home/` that stow refuses to link. Offers to move each unstowable path back to `~`, re-stows (re-linking anything the breakage stranded), then clears symlinks in `~` pointing at paths no longer in `home/`. `--dry-run` reports without changing anything. Run it if `wrangle sync` stops at the re-stow step.
 - `wrangle merge <branch>` — per-item adopt personal-layer content from another machine-branch (Brewfile entries, dotfiles, fisher plugins, univ-var patterns) into the current one. Per-item prompts let you `[a]dopt`, `[s]kip` once, or `skip [f]orever` (writes to `.merge-skip`; bypass with `wrangle merge <branch> --force`).
 - `wrangle push` — push your current branch's commits.
 - `wrangle status` — read-only "where do I stand?" check. Fetches origin, reports whether `origin/main` has updates waiting (i.e. what `wrangle update` would do), lists peer machine-branches with last-updated timestamps (i.e. candidates for `wrangle merge`), and runs `wrangle sync --dry-run` to surface local drift. Mutates no local state.

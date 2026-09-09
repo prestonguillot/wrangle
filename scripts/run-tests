@@ -14,6 +14,15 @@ if ! command -v fish >/dev/null 2>&1; then
     exit 1
 fi
 
+# stow is a hard dependency of wrangle itself, and the dotfile tests exercise
+# real stow behavior (absolute-symlink refusal, restow, conflict text). Without
+# it those paths silently take the "stow not installed" branch and prove
+# nothing — which is how a stow bug reached users with a green suite.
+if ! command -v stow >/dev/null 2>&1; then
+    echo "✗ stow is not installed; install it (brew install stow) and re-run." >&2
+    exit 1
+fi
+
 # Check fishtape is loaded in fish.
 if ! fish -c 'functions -q fishtape' 2>/dev/null; then
     echo "✗ fishtape not installed. Install it once with:" >&2

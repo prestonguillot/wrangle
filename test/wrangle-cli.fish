@@ -168,3 +168,28 @@ $wrangle status --force 2>/dev/null
 set -l status_help_str ($wrangle status --help | string join \n)
 not string match -q '*\\`*' -- "$status_help_str"
 @test "status help has no literal backslash-backticks" $status -eq 0
+
+# ─── repair subcommand surface ──────────────────────────────────────────
+
+string match -q "*repair*" -- "$top_help"
+@test "top-level help lists repair subcommand" $status -eq 0
+
+set -l repair_help ($wrangle repair --help)
+string match -q "*will not stow*" -- "$repair_help"
+@test "repair --help describes what repair does" $status -eq 0
+
+string match -q "*--dry-run*" -- "$repair_help"
+@test "repair --help documents --dry-run" $status -eq 0
+
+# repair takes --dry-run and nothing else.
+$wrangle repair --force 2>/dev/null
+@test "repair rejects --force (sync-only flag)" $status -ne 0
+$wrangle repair --verbose 2>/dev/null
+@test "repair rejects --verbose (sync-only flag)" $status -ne 0
+$wrangle repair --no-branch-switch 2>/dev/null
+@test "repair rejects --no-branch-switch (sync-only flag)" $status -ne 0
+
+# Backtick-rendering test for repair help.
+set -l repair_help_str ($wrangle repair --help | string join \n)
+not string match -q '*\\`*' -- "$repair_help_str"
+@test "repair help has no literal backslash-backticks" $status -eq 0

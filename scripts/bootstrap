@@ -259,7 +259,23 @@ if [ -n "$CONFLICTS_RAW" ]; then
 fi
 
 echo "→ Stowing framework files into ~..."
-stow --no-folding -t "$HOME" -d "$REPO_DIR" home
+# Capture both streams and check the status. This used to run bare, so
+# "✓ Framework symlinked into ~" printed whether or not anything was linked.
+#
+# The pre-flight above only recognizes one conflict shape ("since neither a
+# link nor a directory"), so it does not catch a home/ holding an absolute
+# symlink — stow refuses those outright and links nothing.
+if ! STOW_OUT="$(stow --no-folding -t "$HOME" -d "$REPO_DIR" home 2>&1)"; then
+    echo "✗ stow refused to link home/ into ~:" >&2
+    printf '%s\n' "$STOW_OUT" | sed 's/^/    /' >&2
+    echo >&2
+    echo "  Nothing was linked. home/ is a single stow package, so one path it" >&2
+    echo "  cannot store blocks every file in it. The usual cause is a symlink" >&2
+    echo "  to an absolute path, which stow will not store because it could" >&2
+    echo "  never remove it again." >&2
+    echo "  Remove or replace the path named above, then re-run this script." >&2
+    exit 1
+fi
 echo "✓ Framework symlinked into ~"
 
 # ── 7. Bootstrap fisher (optional, but harmless if already present) ─────

@@ -69,7 +69,9 @@
 # ── FILE STRUCTURE ───────────────────────────────────────────────────────
 # Sections in reading order. To jump to any entry, search the file for its
 # label text — every entry corresponds to a `# ─── <label> ───` divider.
-# Passes 5-8 live in scripts/_drift.fish; the rest are all in this file.
+# Passes 5-8 live in scripts/_drift.fish, and the stow pre-flight, stow
+# runner, and orphan-symlink scan in scripts/_stow_guard.fish; the rest are
+# all in this file.
 #
 #   1. Preamble + subcommand dispatch
 #   2. Help printers
@@ -82,6 +84,7 @@
 #      5.4 push
 #      5.5 review-docs
 #      5.6 status
+#      5.7 repair
 #   6. Commit-message builders
 #   7. Sync pipeline
 #      7.1  Pass 1: framework update
@@ -117,7 +120,7 @@ end
 
 # Reject unknown subcommands.
 switch $_subcmd
-    case sync update merge push review-docs status help
+    case sync update merge push review-docs status repair help
         # known — handled below
     case '*'
         echo "wrangle: unknown subcommand: $_subcmd" >&2
@@ -148,6 +151,13 @@ switch $_subcmd
         set -q _flag_with_claude;      and _wrangle_reject_flag merge --with-claude
         set -q _flag_suppress_claude;  and _wrangle_reject_flag merge --suppress-claude
         set -q _flag_no_branch_switch; and _wrangle_reject_flag merge --no-branch-switch
+    case repair
+        # repair accepts --dry-run (report all three phases, change nothing).
+        set -q _flag_force;            and _wrangle_reject_flag repair --force
+        set -q _flag_verbose;          and _wrangle_reject_flag repair --verbose
+        set -q _flag_with_claude;      and _wrangle_reject_flag repair --with-claude
+        set -q _flag_suppress_claude;  and _wrangle_reject_flag repair --suppress-claude
+        set -q _flag_no_branch_switch; and _wrangle_reject_flag repair --no-branch-switch
     case update push review-docs status help
         # No flags besides --help.
         set -q _flag_dry_run;          and _wrangle_reject_flag $_subcmd --dry-run
@@ -169,6 +179,7 @@ function _wrangle_help_top
     echo "  push                  push the current branch to origin (preview first)"
     echo "  status                fetch + report behind-origin/main, peer machine-branches, drift dry-run"
     echo "  review-docs           skip drift; have claude review docs against recent commits"
+    echo "  repair                fix a home/ that stow refuses, and re-link what it stranded"
     echo "  help [<subcmd>]       this message, or detailed help for a subcommand"
     echo ""
     echo "Env-var knobs:"
@@ -283,6 +294,32 @@ function _wrangle_help_status
     echo "machine-branch."
 end
 
+function _wrangle_help_repair
+    echo "Usage: wrangle repair [--dry-run]"
+    echo ""
+    echo "Recover a machine whose home/ package will not stow."
+    echo ""
+    echo "home/ is a single stow package, so one path stow cannot store blocks"
+    echo "every file in it. When that happens `wrangle sync` stops at the re-stow"
+    echo "pass on every run, and any dotfile moved into the repo before the"
+    echo "breakage sits there with no symlink back into ~. sync cannot fix that,"
+    echo "because sync refuses to start."
+    echo ""
+    echo "Three phases:"
+    echo ""
+    echo "  1. Unstowable paths: everything under home/ that stow will not store"
+    echo "     — symlinks to absolute paths, symlinks pointing outside the tree,"
+    echo "     and sockets, pipes or device files. Each can be moved back to ~."
+    echo "  2. Re-stow: with the package unblocked, this links back every path"
+    echo "     that was moved into home/ but never symlinked."
+    echo "  3. Dangling symlinks: links in ~ pointing at paths no longer in home/."
+    echo ""
+    echo "Never deletes anything from ~. Paths moved back out of home/ leave the"
+    echo "repo dirty on purpose — run `wrangle sync` to review and commit that."
+    echo ""
+    echo "  --dry-run    report all three phases without prompting or writing"
+end
+
 # Dispatch help if requested.
 if test "$_subcmd" = help
     if test (count $argv) -eq 0
@@ -295,6 +332,7 @@ if test "$_subcmd" = help
             case push;                  _wrangle_help_push
             case review-docs;           _wrangle_help_review_docs
             case status;                _wrangle_help_status
+            case repair;                _wrangle_help_repair
             case '*'
                 echo "wrangle: unknown subcommand: $argv[1]" >&2
                 exit 2
@@ -311,6 +349,7 @@ if set -q _flag_help
         case push;                  _wrangle_help_push
         case review-docs;           _wrangle_help_review_docs
         case status;                _wrangle_help_status
+        case repair;                _wrangle_help_repair
     end
     exit 0
 end
@@ -362,6 +401,7 @@ source $repo/scripts/_univ_helpers.fish  # _univ_prefix for capture sub-pass gro
 source $repo/scripts/_commit_msg.fish    # commit-message builder (plain path)
 source $repo/scripts/_drift.fish         # _wrangle_detect_drift — Passes 5-8
 source $repo/scripts/_nag_state.fish     # pull-nag state file format + path
+source $repo/scripts/_stow_guard.fish    # unstowable-path detection + stow runner
 
 # Return the configured machine-branch for this clone, defaulting to `personal`.
 # Inlined (used to live in scripts/_chain.fish, but that file's other helpers
@@ -1151,7 +1191,24 @@ if test "$_subcmd" = merge
     # ── Post-merge: re-stow if any new dotfiles, regenerate univ-vars file if changed ──
     if test "$_merge_need_restow" = yes; and command -q stow
         echo ""
-        _with_spinner "Re-stowing home/ into ~…" stow --no-folding -R -t ~ home
+        # The status used to be discarded entirely, and the merge went on to
+        # git add -A and commit — so a failed stow was invisible and the
+        # adopted dotfiles were committed without ever being linked into ~.
+        #
+        # Unlike the track path, nothing here came out of ~: the adopted files
+        # arrived from the source branch. The repo state is legitimate and
+        # worth committing, so this reports and continues rather than aborting.
+        _wrangle_stow_run "Re-stowing home/ into ~…" $repo
+        or begin
+            echo ""
+            echo "$GLYPH_ERR STOW REFUSED — the adopted files are NOT linked into ~:"
+            _wrangle_stow_explain_failure "    " $_wrangle_stow_err
+            echo ""
+            echo "  The merge itself is fine and will still be committed — the files"
+            echo "  are in "(_name home/)", they just have no symlinks in ~ yet."
+            echo "  Run "(_name "wrangle repair")" to fix the package, then "(_name "wrangle sync")"."
+            echo ""
+        end
     end
 
     if test $_merge_univ_adopted -gt 0
@@ -1366,6 +1423,157 @@ if test "$_subcmd" = status
     # structure rather than by remembering to gate each one.
     echo ""
     _wrangle_detect_drift report
+    exit 0
+end
+
+# ─── repair ──────────────────────────────────────────────────────────────
+# `wrangle repair` — recover a machine whose home/ package will not stow.
+#
+# home/ is a single stow package, so one path stow cannot store blocks every
+# file in it. When that happens, sync stops at Pass 4 on every run, and any
+# dotfile that was moved into the repo before the breakage sits there with no
+# symlink back into ~. That is a state sync cannot dig itself out of, because
+# sync refuses to start — hence a separate subcommand rather than another pass.
+#
+# Three phases, in dependency order:
+#   1. clear the paths stow refuses, moving them back to ~
+#   2. re-stow, which links back everything stranded by the breakage
+#   3. clear symlinks in ~ left pointing at paths no longer in home/
+#
+# --dry-run reports all three without prompting or writing.
+if test "$_subcmd" = repair
+    set -l dry no
+    set -q _flag_dry_run; and set dry yes
+
+    _header "Repair"
+    if test "$dry" = yes
+        echo "  Dry run — reporting only, nothing will be changed."
+    end
+
+    # ── 1. Paths stow will not store ──────────────────────────────────
+    echo ""
+    _subheader "Unstowable paths in home/"
+    set -l hazards (_wrangle_stow_hazards $home_subdir)
+    set -l untracked_count 0
+
+    if test (count $hazards) -eq 0
+        echo "    $GLYPH_OK nothing in "(_name home/)" that stow refuses"
+    else
+        echo "    "(_n (count $hazards))" path(s) stow will not store:"
+        echo ""
+        _wrangle_stow_hazard_report "    " $hazards
+
+        for h in $hazards
+            set -l hpath (string split \t -- $h)[2]
+            set -l rel (string replace -- "$home_subdir/" "" $hpath)
+            set -l target $HOME/$rel
+
+            echo ""
+            echo "    "(_name "home/$rel")
+            if test "$dry" = yes
+                echo "      $GLYPH_DIM would offer to move back to "(_name "~/$rel")
+                continue
+            end
+
+            while true
+                read -P (_keys "    [u]ntrack (move back to ~) / [s]kip / [q]uit > ") choice
+                switch $choice
+                    case u U untrack
+                        if test -e $target; or test -L $target
+                            echo "      $GLYPH_ERR "(_name "~/$rel")" already exists — not overwriting it."
+                            echo "        Move or remove it yourself, then re-run "(_name "wrangle repair")"."
+                            break
+                        end
+                        mkdir -p (dirname $target)
+                        if mv $hpath $target
+                            echo "      $GLYPH_OK moved back to "(_name "~/$rel")
+                            set untracked_count (math $untracked_count + 1)
+                            _log_change "untracked unstowable path: $rel"
+                        else
+                            echo "      $GLYPH_ERR mv failed; left in place"
+                        end
+                        break
+                    case s S skip ''
+                        echo "      $GLYPH_DIM skipped"
+                        break
+                    case q Q quit
+                        _wrangle_abort quit
+                    case '*'
+                        echo "      ? '$choice' — answer u/s/q"
+                end
+            end
+        end
+    end
+
+    # ── 2. Re-stow ────────────────────────────────────────────────────
+    # With the package no longer blocked, this links back every path that was
+    # moved into home/ but never symlinked — the actual repair.
+    echo ""
+    _subheader "Re-stow"
+    if not command -q stow
+        echo "    $GLYPH_WARN stow not installed; cannot re-stow."
+    else if test "$dry" = yes
+        echo "    $GLYPH_DIM would re-stow "(_name home/)" into ~"
+    else if _wrangle_stow_run "Re-stowing home/ into ~…" $repo
+        echo "    $GLYPH_OK "(_name home/)" is stowed into ~"
+    else
+        echo "    $GLYPH_ERR stow still refuses "(_name home/)":"
+        _wrangle_stow_explain_failure "      " $_wrangle_stow_err
+        echo ""
+        echo "    Resolve the path named above and re-run "(_name "wrangle repair")"."
+        exit 1
+    end
+
+    # ── 3. Dangling symlinks ──────────────────────────────────────────
+    echo ""
+    _subheader "Dangling symlinks"
+    set -l orphans (_wrangle_orphan_symlinks $home_subdir)
+    set -l removed_count 0
+
+    if test (count $orphans) -eq 0
+        echo "    $GLYPH_OK no symlinks in ~ pointing at missing paths in home/"
+    else
+        for path in $orphans
+            echo ""
+            echo "    "(_name $path)" $GLYPH_ARROW "(_name (readlink $path))
+            if test "$dry" = yes
+                echo "      $GLYPH_DIM would offer to remove it"
+                continue
+            end
+            while true
+                read -P (_keys "    [r]emove dangling symlink / [s]kip / [q]uit > ") choice
+                switch $choice
+                    case r R remove
+                        rm $path
+                        echo "      $GLYPH_OK removed"
+                        set removed_count (math $removed_count + 1)
+                        _log_change "removed orphan symlink: $path"
+                        break
+                    case s S skip ''
+                        echo "      $GLYPH_DIM skipped"
+                        break
+                    case q Q quit
+                        _wrangle_abort quit
+                    case '*'
+                        echo "      ? '$choice' — answer r/s/q"
+                end
+            end
+        end
+    end
+
+    # Paths moved back out of home/ leave the repo dirty. Say so rather than
+    # committing: what to do with them is the user's call, and the next sync
+    # will offer them again (and refuse to track them again, for the same
+    # reason they were moved back).
+    echo ""
+    if test "$dry" = yes
+        echo "  $GLYPH_DIM dry run — nothing was changed."
+    else
+        echo "  $GLYPH_OK "(_n $untracked_count)" path(s) moved back to ~, "(_n $removed_count)" dangling symlink(s) removed."
+        if test $untracked_count -gt 0
+            echo "    "(_name home/)" has uncommitted deletions. Run "(_name "wrangle sync")" to review and commit them."
+        end
+    end
     exit 0
 end
 
@@ -1614,19 +1822,16 @@ end
 # home/ directly without unstowing first). `stow -R` leaves these behind.
 # Find and clean them up before Pass 4 (re-stow) so subsequent installs
 # don't trip over "conflicting file" errors.
+#
+# Detection lives in scripts/_stow_guard.fish, shared with `wrangle repair`.
+# The version that used to be inline here could not match anything: it ran
+# each candidate through realpath to decide whether it pointed into the repo,
+# but it only ever examined links it had already established were broken, and
+# BSD realpath (macOS) exits 1 without output on a path that does not resolve.
+# $tgt was always empty, so the prefix match always failed.
 set -l orphan_symlinks
 if test "$_dry_run" = no
-    # Scan top-level ~/.<name> and ~/.config/* paths.
-    for f in $HOME/.[A-Za-z0-9]* $HOME/.config/* $HOME/.config/fish/conf.d/* $HOME/.config/fish/functions/*
-        # Only consider symlinks
-        test -L $f; or continue
-        # Only consider symlinks pointing into this repo's home/
-        set -l tgt (realpath $f 2>/dev/null)
-        string match -q "$home_subdir/*" -- $tgt; or continue
-        # Broken? (target doesn't resolve to an existing file)
-        test -e $f; and continue  # `test -e` follows symlinks; false if target missing
-        set -a orphan_symlinks $f
-    end
+    set orphan_symlinks (_wrangle_orphan_symlinks $home_subdir)
 end
 
 if test (count $orphan_symlinks) -gt 0
@@ -1659,17 +1864,24 @@ end
 # ─── Pass 4: re-stow ─────────────────────────────────────────────────────
 if command -q stow
     if test "$_dry_run" = no
-        pushd $repo >/dev/null
-        _with_spinner "Re-stowing home/ into ~…" stow --no-folding -R -t ~ home
+        _wrangle_stow_run "Re-stowing home/ into ~…" $repo
         or begin
-            popd >/dev/null
-            echo "$GLYPH_ERR stow re-stow failed. Resolve conflicts (real files at target paths) and re-run."
+            # This is the gate a machine with an already-broken home/ hits on
+            # every run, so it has to name the actual cause. It used to say
+            # "resolve conflicts (real files at target paths)", which is only
+            # one of the several things stow refuses, and named no path at all.
+            echo ""
+            echo "$GLYPH_ERR STOW REFUSED — home/ could not be linked into ~:"
+            _wrangle_stow_explain_failure "    " $_wrangle_stow_err
+            echo ""
+            echo "  Nothing was changed. home/ is a single stow package, so one"
+            echo "  bad path blocks every file in it."
+            echo "  Run "(_name "wrangle repair")" to find and fix it."
             exit 1
         end
-        popd >/dev/null
     end
 else
-    echo "$GLYPH_WARN  stow not installed; skipping re-stow."
+    echo "$GLYPH_WARN stow not installed; skipping re-stow."
 end
 
 # ─── Passes 5-8: drift detection ─────────────────────────────────────────

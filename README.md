@@ -72,7 +72,7 @@ Three nags fire on shell start to keep you honest: staleness (haven't run wrangl
 
 Domain-specific bits:
 
-- **Dotfiles**: wrangle walks top-level `~/.<name>` files and `~/.config/*` entries. For each untracked entry on the machine, you get `[t]rack` (mv into `home/`, symlink back), `[i]gnore forever` (append to `.dotignore`), `[s]kip`, or `[q]uit`. The other direction (file in `home/` but missing from `~`) splits into two cases: if you previously had it and deleted it, you get a yoink prompt asking whether to remove it from the repo or restore via stow; if it's genuinely new (e.g. arrived via `wrangle update` or `wrangle merge`), stow symlinks it into `~` silently.
+- **Dotfiles**: wrangle walks top-level `~/.<name>` files and `~/.config/*` entries. For each untracked entry on the machine, you get `[t]rack` (mv into `home/`, symlink back), `[i]gnore forever` (append to `.dotignore`), `[s]kip`, or `[q]uit`. Paths stow cannot store are the exception: they're reported with the reason and offered only `[i]gnore forever` / `[s]kip` / `[q]uit`, never `[t]rack`. Three things disqualify a path — a symlink to an absolute path (stow refuses it outright, because it could never remove it again), a symlink pointing outside the path being tracked (it would resolve against the repo after the move, not `~`), and a socket, pipe or device file (git can't store it). This matters more than it sounds: `home/` is a **single stow package**, so one path stow won't take blocks every file in it. If a track does fail at the stow step, the move is rolled back and the run stops rather than continuing into the next path. The other direction (file in `home/` but missing from `~`) splits into two cases: if you previously had it and deleted it, you get a yoink prompt asking whether to remove it from the repo or restore via stow; if it's genuinely new (e.g. arrived via `wrangle update` or `wrangle merge`), stow symlinks it into `~` silently.
 - **Fisher plugins**: compares `fisher list` against the tracked `fish_plugins` file, filtering both sides through `.fisherignore`. Plugins installed but not tracked → `[t]rack` / `[i]gnore` (appends to `.fisherignore`, leaves the plugin installed) / `[s]kip`. Plugins tracked but not installed → `[i]nstall` / `[r]emove from fish_plugins` / `[s]kip`. To uninstall a plugin, run `fisher remove` directly.
 - **Fish universals**: two sub-passes, matching the two-direction shape of the fisher and brew passes. **Capture**: collects current universals (`set -U -L`), auto-skips anything starting with `_` (fish + plugin internal convention), groups the rest by prefix. For each new prefix group, offers to track the pattern (e.g. `tide_*`) into `.univexport`, ignore forever into `.univignore`, or skip. Tracked vars get regenerated into `home/.config/fish/exported-univ-vars.fish`. **Import**: parses that same file for tracked names + values, compares to your live shell. Missing-on-machine → silent apply (matching how stow silently symlinks newly-tracked dotfiles). Different value live vs repo → prompts `[a]pply repo value / [k]eep local / [s]kip / [q]uit`. No `[k]eep local forever` memory needed — the capture sub-pass that follows regenerates the file with whatever's live, so the conflict one-shots itself.
 - **Brew**: calls `dump-brewfile` (a thin wrapper around `brew bundle dump --describe --force`, filtered through `.brewignore`) and diffs the result against your tracked `Brewfile`. When something's installed locally but missing from the Brewfile, wrangle asks whether to track it, add a `.brewignore` substring so it stops nagging, or skip. When something's in the Brewfile but not installed locally, it asks whether to install it, drop it from the Brewfile, or skip.
@@ -111,12 +111,15 @@ scripts/
   dump-brewfile  Fish. `brew bundle dump` with .brewignore filtering applied.
   scan-secrets   Fish. Pre-commit safety net for high-confidence secret patterns.
   bump-version   Bash. Semver-tags main. Called by the release workflow, rarely manually.
-  run-tests      Bash. Wraps fishtape over test/*.fish.
+  run-tests      Bash. Wraps fishtape over test/*.fish. Needs fish, fishtape
+                 and stow (the dotfile tests exercise real stow behavior).
   _*.fish        Fish. Units sourced by wrangle, split out so more than one
                  subcommand (and the tests) can use them: _skiplist (ignore-file
                  parsing), _univ_parse / _univ_helpers (universals), _commit_msg
                  (commit messages), _drift (Passes 5-8, shared by `sync` and
-                 `status`), _nag_state (pull-nag state file format).
+                 `status`), _nag_state (pull-nag state file format),
+                 _stow_guard (what stow can't store, the stow runner itself,
+                 and stow's failure text translated into a cause).
 
 test/            Fishtape tests covering wrangle CLI surface, scan-secrets, dump-brewfile, bump-version.
   helpers/       Shared fixture construction. Not collected by `fishtape test/*.fish`
@@ -154,6 +157,7 @@ Things that aren't on `main` (they're personal-layer, on your machine-branch): `
 | `wrangle push` | Push the current branch to origin, with a preview of what's about to ship. No prompt — typing the subcommand is the decision. |
 | `wrangle status` | Read-only summary. Fetches origin, then reports **Update status** (this branch vs `origin/<branch>` — unpushed or unpulled commits), **Framework update** (commits on `origin/main` not yet merged in), peer machine-branches with last-updated timestamps, and a `wrangle sync --dry-run` of local drift. Mutates nothing. |
 | `wrangle review-docs` | Skip drift; have claude review the repo's docs against recent commits. |
+| `wrangle repair` | Recover a `home/` that stow refuses. Offers to move each unstowable path back to `~`, re-stows (which re-links anything stranded by the breakage), then clears symlinks in `~` pointing at paths no longer in `home/`. Accepts `--dry-run`. Run this when `wrangle sync` stops at the re-stow pass. |
 
 Bare `wrangle`, `wrangle -h`, and `wrangle --help` all print top-level help. There's no implicit-sync shortcut — type `wrangle sync` to sync.
 
