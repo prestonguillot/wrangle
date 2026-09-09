@@ -3,8 +3,6 @@
 
 set -U --erase CLAUDE_CODE_EFFORT_LEVEL
 set -U CLAUDE_CODE_EFFORT_LEVEL high
-set -U --erase nvm_default_version
-set -U nvm_default_version lts
 set -U --erase sponge_allow_previously_successful
 set -U sponge_allow_previously_successful true
 set -U --erase sponge_delay

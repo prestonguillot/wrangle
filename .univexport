@@ -18,5 +18,4 @@
 #     line here; an explicit allowlist match wins over the auto-skip.
 sponge_*
 tide_*
-nvm_*
 CLAUDE_*
