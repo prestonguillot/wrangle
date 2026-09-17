@@ -102,3 +102,8 @@ cmp -s $fixture_input $target
 set target (mktemp)
 $dump --input /nonexistent-file-foobar (random) $target 2>/dev/null
 @test "--input pointing at nonexistent file exits non-zero" $status -ne 0
+
+# Don't stub `brew` by prepending to PATH here: dump-brewfile's
+# `#!/usr/bin/env fish` shebang re-runs config.fish, whose `brew shellenv`
+# prepends /opt/homebrew/bin and outranks the stub, so the test silently
+# exercises real brew instead.

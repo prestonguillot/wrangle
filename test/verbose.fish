@@ -146,7 +146,7 @@ end
 rm -rf $fix3 $home3
 
 # ─── Domain 4: .brewignore (via dump-brewfile) ───────────────────────────
-# Stub `brew` so `brew bundle dump --describe --force --file=<tmp>` writes
+# Stub `brew` so `brew bundle dump --force --file=<tmp>` writes
 # a fake Brewfile containing a line matching the .brewignore pattern.
 # dump-brewfile's filter then drops it, and --verbose surfaces what was dropped.
 
