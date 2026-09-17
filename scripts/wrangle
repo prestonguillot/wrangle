@@ -636,11 +636,22 @@ end
 # doc-review prompt is self-contained per run — and they failed
 # intermittently when a prior wrangle invocation was interrupted and left
 # the session locked server-side ("Session ID … is already in use").
-function _wrangle_invoke_claude
+function _wrangle_invoke_claude --argument-names claude_cwd
+    set -l prompt $argv[2]
     set -l model sonnet
     set -l effort low
     test -n "$WRANGLE_CLAUDE_MODEL"; and set model "$WRANGLE_CLAUDE_MODEL"
     test -n "$WRANGLE_CLAUDE_EFFORT"; and set effort "$WRANGLE_CLAUDE_EFFORT"
+
+    # claude resolves relative paths (and its own repo/git context) against the
+    # cwd it inherits, NOT against anything in the prompt. wrangle is runnable
+    # from anywhere, so without this pushd claude would inspect — and with
+    # acceptEdits, happily edit — whatever directory the user happened to be
+    # standing in. Guard it: refuse rather than run against the wrong tree.
+    if test -z "$claude_cwd"; or not test -d "$claude_cwd"
+        echo "  $GLYPH_ERR internal: no valid repo dir for claude (got '$claude_cwd')" >&2
+        return 1
+    end
 
     echo "  $GLYPH_DIM model=$model · effort=$effort"
     echo ""
@@ -656,10 +667,13 @@ function _wrangle_invoke_claude
     # Doc review needs to read files, grep for references, and edit/create
     # markdown — nothing else.
     _spinner_start "claude thinking… (model=$model effort=$effort)"
+    pushd $claude_cwd >/dev/null
     claude -p --output-format text --permission-mode acceptEdits \
         --allowedTools "Read,Edit,Write,Grep,Glob" \
-        --model $model --effort $effort "$argv[1]"
+        --add-dir $claude_cwd \
+        --model $model --effort $effort "$prompt"
     set -l rv $status
+    popd >/dev/null
     _spinner_stop
     return $rv
 end
@@ -1277,7 +1291,7 @@ if test "$_subcmd" = review-docs
     _header "Doc review"
     echo "  Asking claude to review docs against recent repo state..."
 
-    set -l prompt_text "You are claude-code invoked by `wrangle review-docs` at $repo. The user has explicitly asked you to review the repo's documentation against the current state of the repo and recent activity. There are no specific changes from a wrangle run this time — your job is to look at the recent commits and current docs and propose updates if anything is factually wrong, out of date, or incomplete.
+    set -l prompt_text "You are claude-code invoked by `wrangle review-docs`. The repo you are working on is at the absolute path $repo, and that is your working directory — every file you read, write, or glob MUST be inside it. Use paths relative to $repo (or absolute paths under it); do not look at or edit files outside that tree, and do not infer the repo from any other directory. The user has explicitly asked you to review the repo's documentation against the current state of the repo and recent activity. There are no specific changes from a wrangle run this time — your job is to look at the recent commits and current docs and propose updates if anything is factually wrong, out of date, or incomplete.
 
 The repo has two doc tiers:
   - FRAMEWORK docs describe the sync system itself: README.md and setup-new-machine.md at the repo root. They live on `main` and should stay opinion-free.
@@ -1296,7 +1310,7 @@ Recent commit history (last 15 commits):
 "
     end
 
-    _wrangle_invoke_claude "$prompt_text"
+    _wrangle_invoke_claude $repo "$prompt_text"
     set -l rv $status
     echo ""
     if test $rv -eq 0
@@ -1958,7 +1972,9 @@ if test "$_dry_run" = no; and test "$_committed" = yes; and test "$_claude_opt" 
         _header "Doc sync"
 
         # Build context: changes from this run + any pending from prior runs.
-        set -l prompt_text "You are claude-code invoked by `wrangle` at $repo. Your job: keep the repo's documentation aligned with reality as changes accumulate.
+        set -l prompt_text "You are claude-code invoked by `wrangle`. The repo you are working on is at the absolute path $repo, and that is your working directory — every file you read, write, or glob MUST be inside it. Use paths relative to $repo (or absolute paths under it); do not look at or edit files outside that tree, and do not infer the repo from any other directory.
+
+Your job: keep the repo's documentation aligned with reality as changes accumulate.
 
 The repo has two documentation tiers:
   - FRAMEWORK docs describe the sync system itself: README.md and setup-new-machine.md at the repo root. They live on `main` and should stay opinion-free (no presumption of specific tools, no personal preferences). Edit these only if the framework itself changed in a way that makes existing text factually wrong.
@@ -1985,7 +2001,7 @@ Recent commit history (for context — last 10 commits):
 "
         end
 
-        _wrangle_invoke_claude "$prompt_text"
+        _wrangle_invoke_claude $repo "$prompt_text"
         set -l rv $status
         echo ""
         if test $rv -ne 0
