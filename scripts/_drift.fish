@@ -864,17 +864,33 @@ function _wrangle_detect_drift --argument-names mode
     # DETECT drift (read-only comparison), just not to write back changes.
     echo ""
     _header "Brew drift"
+    set -l brew_scan_ok no
+    set -l tmp_dump
     if not command -q brew
         echo "  brew not installed; skipping."
     else
-        set -l tmp_dump (mktemp)
+        set tmp_dump (mktemp)
         set -l tmp_dump_stderr (mktemp)
         _spinner_start "Scanning installed brew state…"
         set -l dump_args $tmp_dump
         test "$_verbose" = yes; and set dump_args --verbose $dump_args
         $repo/scripts/dump-brewfile $dump_args 2>$tmp_dump_stderr
+        set -l dump_rv $status
         _spinner_stop
-        if test "$_verbose" = yes; and test -s $tmp_dump_stderr
+        # Don't skip this status check: a failed dump leaves $tmp_dump empty,
+        # which compares as "nothing is installed" — every Brewfile entry then
+        # prompts as missing, offering to reinstall or delete the lot.
+        if test $dump_rv -ne 0
+            echo "  $GLYPH_WARN brew state scan failed (dump-brewfile exit $dump_rv); skipping brew drift."
+            if test -s $tmp_dump_stderr
+                while read -l ln
+                    echo "      $GLYPH_DIM $ln"
+                end < $tmp_dump_stderr
+            end
+        else
+            set brew_scan_ok yes
+        end
+        if test "$brew_scan_ok" = yes; and test "$_verbose" = yes; and test -s $tmp_dump_stderr
             # dump-brewfile --verbose emits one "<line>\t(matches .brewignore: <pat>)"
             # line to stderr per filtered entry. Surface each in our own DIM format.
             while read -l ln
@@ -884,7 +900,9 @@ function _wrangle_detect_drift --argument-names mode
             end < $tmp_dump_stderr
         end
         rm -f $tmp_dump_stderr
+    end
 
+    if test "$brew_scan_ok" = yes
         set -l brewfile_path $repo/Brewfile
         set -l tracked_entries
         if test -f $brewfile_path
@@ -1047,13 +1065,6 @@ function _wrangle_detect_drift --argument-names mode
             end
         end
 
-        rm -f $tmp_dump
-
-        # Catch Brewfile/.brewignore modifications that didn't surface through
-        # drift — file was edited (hand or by dump-brewfile) but is now in sync
-        # with the installed state.
-        _report_external_changes "Brewfile / .brewignore has uncommitted changes" Brewfile .brewignore
-
         # Summary: parallel to the other passes — only counts line when work
         # happened; the "Brewfile matches installed state" ok-line above is the
         # no-work summary.
@@ -1063,4 +1074,11 @@ function _wrangle_detect_drift --argument-names mode
             echo "  $GLYPH_OK "(_n $brew_tracked)" tracked, "(_n $brew_ignored)" ignored, "(_n $brew_installed)" installed, "(_n $brew_removed)" removed"
         end
     end
+
+    test -n "$tmp_dump"; and rm -f $tmp_dump
+
+    # Catch Brewfile/.brewignore modifications that didn't surface through
+    # drift — file was edited (hand or by dump-brewfile) but is now in sync
+    # with the installed state.
+    _report_external_changes "Brewfile / .brewignore has uncommitted changes" Brewfile .brewignore
 end

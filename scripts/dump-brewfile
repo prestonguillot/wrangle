@@ -1,5 +1,5 @@
 #!/usr/bin/env fish
-# dump-brewfile — `brew bundle dump --describe --force` with .brewignore filtering.
+# dump-brewfile — `brew bundle dump --force` with .brewignore filtering.
 #
 # Usage:
 #   dump-brewfile [TARGET]              # normal: dump from brew, filter, write to TARGET
@@ -17,7 +17,7 @@ if set -q _flag_help
     echo "Usage: dump-brewfile [TARGET]"
     echo "       dump-brewfile [--input INPUT] [--ignore-file FILE] [-v|--verbose] TARGET"
     echo ""
-    echo "Wraps 'brew bundle dump --describe --force --file=TARGET' with .brewignore filtering."
+    echo "Wraps 'brew bundle dump --force --file=TARGET' with .brewignore filtering."
     echo "  --input FILE        filter FILE instead of calling brew (for tests)"
     echo "  --ignore-file FILE  use FILE as ignore list instead of <repo>/.brewignore"
     echo "  -v, --verbose       emit each filtered (dropped) line to stderr with the matched pattern"
@@ -48,10 +48,13 @@ if set -q _flag_input
     end
     cp $_flag_input $tmp_dump
 else
-    # Suppress brew's API-cache refresh chatter ("✔︎ JSON API cask.jws.json …
-    # Downloaded …MB") which is informational noise that pollutes wrangle's
-    # output. Real errors still surface via the exit-status check below.
-    brew bundle dump --describe --force --file $tmp_dump >/dev/null 2>&1
+    # Don't add `--describe` to get description comments: Homebrew 7 disabled
+    # the switch, and passing it aborts the whole dump.
+    #
+    # Don't redirect stderr either — it carries the reason a dump failed, and
+    # the caller prints it. stdout is dropped to hide brew's API-cache chatter
+    # ("✔︎ JSON API cask.jws.json … Downloaded …MB").
+    brew bundle dump --force --file $tmp_dump >/dev/null
     or begin
         rm -f $tmp_dump
         exit 1
@@ -71,7 +74,8 @@ if test (count $patterns) -eq 0
 end
 
 # Filter: drop any line containing a pattern as substring; drop its preceding
-# comment line too (brew bundle dump --describe emits "# desc\nbrew "x"" pairs).
+# comment line too, so a hand-written "# desc\nbrew "x"" pair goes as a unit
+# and does not leave the description orphaned above the next entry.
 set -l tmp_filtered (mktemp)
 set -l pending ""
 while read -l line
