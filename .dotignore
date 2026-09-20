@@ -79,3 +79,4 @@ id_*                    # SSH keys via the conventional naming
 *.swo                   # vim swap (alternate)
 .netrwhist              # vim netrw history
 .config/gtk-4.0
+.claude.json.tmp.96818.367e21215fef
