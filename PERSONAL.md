@@ -115,6 +115,16 @@ circleci setup
 
 It prompts for a CircleCI API token (generate one at https://app.circleci.com/settings/user/tokens) and, optionally, a custom API endpoint (leave default for circleci.com). Config is written to `~/.circleci/cli.yml`.
 
+## Node CA certs behind Zscaler
+
+On corporate networks with Zscaler TLS interception, curl works (it reads the macOS keychain) but Node-based tools like `npm`/`npx` fail with `UNABLE_TO_GET_ISSUER_CERT_LOCALLY`, because Node doesn't read the keychain. The fish config sets `NODE_EXTRA_CA_CERTS` if `~/zscaler-ca.pem` exists, but that file isn't created by bootstrap — generate it once per machine:
+
+```fish
+security find-certificate -a -c "Zscaler" -p /System/Library/Keychains/SystemRootCertificates.keychain > ~/zscaler-ca.pem
+```
+
+Regenerate it the same way if the proxy or its cert changes. On a machine without Zscaler, just skip this — the fish config no-ops if the file is missing.
+
 ## Fisher plugins
 
 `fish_plugins` (tracked in the repo, symlinked into `~/.config/fish/`) lists `jorgebucaran/fisher` itself plus `fzf.fish`, `autopair.fish`, and `sponge`. Bootstrap installs fisher but doesn't auto-install the plugins. One-liner:
