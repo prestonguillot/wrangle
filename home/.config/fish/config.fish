@@ -112,6 +112,15 @@ function tmi --description 'tldr first, real man as fallback'
     command man $argv
 end
 
+# Corporate TLS interception (Zscaler). Node does not read the macOS keychain, so
+# tools like npm/npx fail with UNABLE_TO_GET_ISSUER_CERT_LOCALLY while curl works.
+# NODE_EXTRA_CA_CERTS *adds* to Node's trust store; npm's `cafile` would replace it.
+# Regenerate after a proxy/cert change with:
+#   security find-certificate -a -c "Zscaler" -p /System/Library/Keychains/SystemRootCertificates.keychain > ~/zscaler-ca.pem
+if test -f $HOME/zscaler-ca.pem
+    set -gx NODE_EXTRA_CA_CERTS $HOME/zscaler-ca.pem
+end
+
 ### MANAGED BY RANCHER DESKTOP START (DO NOT EDIT)
 set --export --prepend PATH "/Users/pguillot/.rd/bin"
 ### MANAGED BY RANCHER DESKTOP END (DO NOT EDIT)
