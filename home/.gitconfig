@@ -49,3 +49,7 @@
 	cmd = kdiff3 --L1 \"$BASE\" --L2 \"$LOCAL\" --L3 \"$REMOTE\" -o \"$MERGED\" \"$BASE\" \"$LOCAL\" \"$REMOTE\"
 [init]
 	defaultBranch = main
+[includeIf "gitdir:~/development/assets/"]
+	path = ~/.gitconfig-work
+[includeIf "gitdir:~/development/shared/"]
+	path = ~/.gitconfig-work
