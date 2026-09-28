@@ -4,6 +4,19 @@
 
 Run any of these you need after `./scripts/bootstrap` completes.
 
+## Work git identity (Credit Karma)
+
+`home/.gitconfig` sets my personal identity (`prestonguillot@gmail.com`) as the default, then conditionally includes `home/.gitconfig-work` — which overrides `user.email` to `preston.guillot@creditkarma.com` — for any repo under `~/development/assets/` or `~/development/shared/`:
+
+```
+[includeIf "gitdir:~/development/assets/"]
+	path = ~/.gitconfig-work
+[includeIf "gitdir:~/development/shared/"]
+	path = ~/.gitconfig-work
+```
+
+Clone work repos under one of those two directories to get the right commit email automatically. If a work repo lives somewhere else, either move it or add another `includeIf` block for its path. Check which identity applies in a given repo with `git config user.email`.
+
 ## GitHub auth (`gh`)
 
 My `home/.gitconfig` configures git to use the `gh` CLI as its credential helper for github.com and gist.github.com. For that to work, you have to authenticate gh once per machine:
