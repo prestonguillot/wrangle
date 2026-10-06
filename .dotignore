@@ -142,3 +142,5 @@ id_*                    # SSH keys via the conventional naming
 .claude.json.backup.1790037502780
 .claude.json.backup.1790086231416
 .claude.json.backup.1790169398692
+.scalac
+.config/java

@@ -133,3 +133,11 @@ cask "helium-browser"
 cask "temurin@17"
 # Polyglot runtime manager (asdf rust clone)
 brew "mise"
+# Pure Scala Artifact Fetching
+brew "coursier"
+# Tool for glamorous shell scripts
+brew "gum"
+# Handy way to save and run project-specific commands
+brew "just"
+# Fast and powerful Git hooks manager for any type of projects
+brew "lefthook"
