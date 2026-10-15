@@ -926,9 +926,17 @@ function _wrangle_detect_drift --argument-names mode
         # NOTE: tmp_dump stays alive through the loops — [t]rack reads the
         #       description-comment for the entry out of it. Cleaned up after.
 
+        # Compare on `type "name"` only: the dump appends options to a line
+        # (`, link: false`, `, trusted: true`, …) that a Brewfile entry for the
+        # same package may not carry, and an exact match would report it as both
+        # untracked and missing.
+        set -l opts_re '^(\w+ "[^"]+"),.*'
+        set -l tracked_keys (string replace -r $opts_re '$1' -- $tracked_entries)
+        set -l installed_keys (string replace -r $opts_re '$1' -- $installed_entries)
+
         set -l added
         for e in $installed_entries
-            contains -- $e $tracked_entries; or set -a added $e
+            contains -- (string replace -r $opts_re '$1' -- $e) $tracked_keys; or set -a added $e
         end
         set -l missing
         for e in $tracked_entries
@@ -936,7 +944,7 @@ function _wrangle_detect_drift --argument-names mode
                 set -l name (string match -r '"([^"]+)"' -- $e)[2]
                 contains -- $name $installed_formulae; or set -a missing $e
             else
-                contains -- $e $installed_entries; or set -a missing $e
+                contains -- (string replace -r $opts_re '$1' -- $e) $installed_keys; or set -a missing $e
             end
         end
 
