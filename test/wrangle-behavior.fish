@@ -115,3 +115,93 @@ begin
 end
 
 rm -rf $fix4 $home4 $stubdir4
+
+# ─── Brew drift: formula installed as a dependency ────────────────────────
+# `brew bundle dump` leaves out formulae that were installed as a dependency
+# of something else. A Brewfile entry for one must not be reported as
+# "NOT installed" when `brew list` shows it is.
+
+set -l f5 (_wrangle_fixture)
+set -l fix5 $f5[1]; set -l home5 $f5[2]
+set -l stubdir5 (mktemp -d)
+
+printf '%s\n' '#!/bin/sh' \
+    'case "$1" in' \
+    '  bundle) echo \'brew "gnupg"\' > "$5" ;;' \
+    '  list) echo gnupg; echo pinentry ;;' \
+    'esac' > $stubdir5/brew
+chmod +x $stubdir5/brew
+
+printf 'brew "gnupg"\nbrew "pinentry"\nbrew "ripgrep"\n' > $fix5/Brewfile
+git -C $fix5 commit -q -am 'brewfile entries for dependency-formula test'
+
+begin
+    set -lx HOME $home5
+    set -lx PATH $stubdir5 $PATH
+    set -l out (env WRANGLE_NO_BRANCH_SWITCH=1 $fix5/scripts/wrangle sync --dry-run 2>&1 | string join \n)
+
+    not string match -q '*brew "pinentry"*' -- "$out"
+    @test "dependency-installed formula in Brewfile → not reported as missing" $status -eq 0
+
+    string match -q '*NOT installed (1)*brew "ripgrep"*' -- "$out"
+    @test "formula absent from brew list → still reported as missing" $status -eq 0
+end
+
+rm -rf $fix5 $home5 $stubdir5
+
+# ─── Brew drift: failed `brew list` ───────────────────────────────────────
+
+set -l f6 (_wrangle_fixture)
+set -l fix6 $f6[1]; set -l home6 $f6[2]
+set -l stubdir6 (mktemp -d)
+
+printf '%s\n' '#!/bin/sh' \
+    'case "$1" in' \
+    '  bundle) echo \'brew "gnupg"\' > "$5" ;;' \
+    '  list) echo "Error: list is broken" >&2; exit 1 ;;' \
+    'esac' > $stubdir6/brew
+chmod +x $stubdir6/brew
+
+printf 'brew "gnupg"\nbrew "pinentry"\n' > $fix6/Brewfile
+git -C $fix6 commit -q -am 'brewfile entries for failed-list test'
+
+begin
+    set -lx HOME $home6
+    set -lx PATH $stubdir6 $PATH
+    set -l out (env WRANGLE_NO_BRANCH_SWITCH=1 $fix6/scripts/wrangle sync --dry-run 2>&1 | string join \n)
+
+    string match -q '*brew state scan failed (brew list*' -- "$out"
+    @test "failed brew list → says the scan failed" $status -eq 0
+
+    not string match -q '*NOT installed*' -- "$out"
+    @test "failed brew list → does not report tracked entries as missing" $status -eq 0
+end
+
+rm -rf $fix6 $home6 $stubdir6
+
+# ─── Brew drift: options on dumped lines ──────────────────────────────────
+
+set -l f7 (_wrangle_fixture)
+set -l fix7 $f7[1]; set -l home7 $f7[2]
+set -l stubdir7 (mktemp -d)
+
+printf '%s\n' '#!/bin/sh' \
+    'case "$1" in' \
+    '  bundle) printf \'%s\n\' \'brew "fish", link: false\' \'cask "zed", trusted: true\' > "$5" ;;' \
+    '  list) echo fish ;;' \
+    'esac' > $stubdir7/brew
+chmod +x $stubdir7/brew
+
+printf 'brew "fish"\ncask "zed"\n' > $fix7/Brewfile
+git -C $fix7 commit -q -am 'brewfile entries for dump-options test'
+
+begin
+    set -lx HOME $home7
+    set -lx PATH $stubdir7 $PATH
+    set -l out (env WRANGLE_NO_BRANCH_SWITCH=1 $fix7/scripts/wrangle sync --dry-run 2>&1 | string join \n)
+
+    string match -q '*Brewfile matches installed state*' -- "$out"
+    @test "dumped line with options matches the plain Brewfile entry" $status -eq 0
+end
+
+rm -rf $fix7 $home7 $stubdir7

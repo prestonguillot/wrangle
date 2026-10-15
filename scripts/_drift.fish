@@ -866,18 +866,24 @@ function _wrangle_detect_drift --argument-names mode
     _header "Brew drift"
     set -l brew_scan_ok no
     set -l tmp_dump
+    set -l installed_formulae
     if not command -q brew
         echo "  brew not installed; skipping."
     else
         set tmp_dump (mktemp)
         set -l tmp_dump_stderr (mktemp)
+        set -l tmp_list_stderr (mktemp)
         _spinner_start "Scanning installed brew state…"
         set -l dump_args $tmp_dump
         test "$_verbose" = yes; and set dump_args --verbose $dump_args
         $repo/scripts/dump-brewfile $dump_args 2>$tmp_dump_stderr
         set -l dump_rv $status
+        # The dump omits formulae installed as a dependency, so it can't answer
+        # "is this Brewfile formula installed?" — `brew list` can.
+        set installed_formulae (brew list --formula --full-name 2>$tmp_list_stderr)
+        set -l list_rv $status
         _spinner_stop
-        # Don't skip this status check: a failed dump leaves $tmp_dump empty,
+        # Don't skip these status checks: a failed scan leaves its output empty,
         # which compares as "nothing is installed" — every Brewfile entry then
         # prompts as missing, offering to reinstall or delete the lot.
         if test $dump_rv -ne 0
@@ -887,9 +893,17 @@ function _wrangle_detect_drift --argument-names mode
                     echo "      $GLYPH_DIM $ln"
                 end < $tmp_dump_stderr
             end
+        else if test $list_rv -ne 0
+            echo "  $GLYPH_WARN brew state scan failed (brew list exit $list_rv); skipping brew drift."
+            if test -s $tmp_list_stderr
+                while read -l ln
+                    echo "      $GLYPH_DIM $ln"
+                end < $tmp_list_stderr
+            end
         else
             set brew_scan_ok yes
         end
+        rm -f $tmp_list_stderr
         if test "$brew_scan_ok" = yes; and test "$_verbose" = yes; and test -s $tmp_dump_stderr
             # dump-brewfile --verbose emits one "<line>\t(matches .brewignore: <pat>)"
             # line to stderr per filtered entry. Surface each in our own DIM format.
@@ -912,13 +926,26 @@ function _wrangle_detect_drift --argument-names mode
         # NOTE: tmp_dump stays alive through the loops — [t]rack reads the
         #       description-comment for the entry out of it. Cleaned up after.
 
+        # Compare on `type "name"` only: the dump appends options to a line
+        # (`, link: false`, `, trusted: true`, …) that a Brewfile entry for the
+        # same package may not carry, and an exact match would report it as both
+        # untracked and missing.
+        set -l opts_re '^(\w+ "[^"]+"),.*'
+        set -l tracked_keys (string replace -r $opts_re '$1' -- $tracked_entries)
+        set -l installed_keys (string replace -r $opts_re '$1' -- $installed_entries)
+
         set -l added
         for e in $installed_entries
-            contains -- $e $tracked_entries; or set -a added $e
+            contains -- (string replace -r $opts_re '$1' -- $e) $tracked_keys; or set -a added $e
         end
         set -l missing
         for e in $tracked_entries
-            contains -- $e $installed_entries; or set -a missing $e
+            if string match -q 'brew *' -- $e
+                set -l name (string match -r '"([^"]+)"' -- $e)[2]
+                contains -- $name $installed_formulae; or set -a missing $e
+            else
+                contains -- (string replace -r $opts_re '$1' -- $e) $installed_keys; or set -a missing $e
+            end
         end
 
         set -l brew_tracked 0
