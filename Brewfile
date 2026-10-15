@@ -141,3 +141,5 @@ brew "gum"
 brew "just"
 # Fast and powerful Git hooks manager for any type of projects
 brew "lefthook"
+# Pinentry for GPG on Mac
+brew "pinentry-mac"

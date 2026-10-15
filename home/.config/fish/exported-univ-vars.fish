@@ -240,7 +240,7 @@ set -U tide_python_icon 󰌠
 set -U --erase tide_right_prompt_frame_enabled
 set -U tide_right_prompt_frame_enabled false
 set -U --erase tide_right_prompt_items
-set -U tide_right_prompt_items status cmd_duration context jobs direnv bun node python rustc java php pulumi ruby go gcloud kubectl distrobox toolbox terraform aws nix_shell crystal elixir zig time
+set -U tide_right_prompt_items status cmd_duration context jobs direnv bun node python rustc java php pulumi ruby go distrobox toolbox terraform aws nix_shell crystal elixir zig sbt
 set -U --erase tide_right_prompt_prefix
 set -U tide_right_prompt_prefix ' '
 set -U --erase tide_right_prompt_separator_diff_color
@@ -261,6 +261,12 @@ set -U --erase tide_rustc_color
 set -U tide_rustc_color F74C00
 set -U --erase tide_rustc_icon
 set -U tide_rustc_icon 
+set -U --erase tide_sbt_bg_color
+set -U tide_sbt_bg_color normal
+set -U --erase tide_sbt_color
+set -U tide_sbt_color DC322F
+set -U --erase tide_sbt_icon
+set -U tide_sbt_icon λ
 set -U --erase tide_shlvl_bg_color
 set -U tide_shlvl_bg_color normal
 set -U --erase tide_shlvl_color
