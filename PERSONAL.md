@@ -44,6 +44,18 @@ Verify: `java --version` should print something like `openjdk 26.x.x …`.
 
 If you don't actually want Java on a given machine, remove `brew "openjdk"` and `brew "sbt"` from the Brewfile and uninstall them.
 
+## Temurin 17 (`temurin@17`)
+
+The Brewfile also installs `temurin@17` (Eclipse Adoptium, per the Homebrew cask description) for projects that need Java 17. It's a `.pkg` cask, so `brew bundle install` will stop for your admin password partway through — run it in a real terminal, not a headless session. The JDK lands at `/Library/Java/JavaVirtualMachines/temurin-17.jdk`.
+
+With this and `openjdk` both installed, `java` alone doesn't tell you which one a build will use. For a project that needs 17, point `JAVA_HOME` at the explicit bundle path rather than a version-only lookup:
+
+```fish
+set -gx JAVA_HOME /Library/Java/JavaVirtualMachines/temurin-17.jdk/Contents/Home
+```
+
+Check which JDKs are present with `/usr/libexec/java_home -V`, and confirm the one you picked with `$JAVA_HOME/bin/java -version`. Whether a given distribution is approved for work use isn't something this repo records — check before relying on it.
+
 ## Mac App Store
 
 Sign into the App Store app with the Apple ID that originally purchased my MAS apps (currently Okta Verify, `id: 490179405`). `brew bundle install` will skip MAS lines for unowned apps with a warning rather than failing.
@@ -127,6 +139,37 @@ circleci setup
 ```
 
 It prompts for a CircleCI API token (generate one at https://app.circleci.com/settings/user/tokens) and, optionally, a custom API endpoint (leave default for circleci.com). Config is written to `~/.circleci/cli.yml`.
+
+## mise (`mise`)
+
+`home/.config/mise/config.toml` pins `node = "lts"`, and `config.fish` puts `~/.local/share/mise/shims` at the front of `PATH`. The shims directory only has `node`/`npm`/`npx` in it once mise has installed the tool, so on a fresh machine run once:
+
+```fish
+mise install
+```
+
+Until then, `node` resolves to whatever else is on `PATH` (or nothing).
+
+## GPG pinentry (`pinentry-mac`)
+
+`gnupg` and `pinentry-mac` are installed, but nothing in this repo tells gpg-agent to use `pinentry-mac`; without that, passphrase prompts have no GUI to appear in. Point the agent at it once per machine:
+
+```fish
+mkdir -p ~/.gnupg
+chmod 700 ~/.gnupg
+echo "pinentry-program "(brew --prefix)"/bin/pinentry-mac" >> ~/.gnupg/gpg-agent.conf
+gpgconf --kill gpg-agent
+```
+
+`~/.gnupg/gpg-agent.conf` isn't tracked, so this has to be repeated on each machine. Check for an existing `pinentry-program` line first so you don't add a duplicate.
+
+## Lefthook (`lefthook`)
+
+`lefthook` only runs in repos where its git hooks have been installed. In each repo that has a `lefthook.yml`, run once after cloning:
+
+```fish
+lefthook install
+```
 
 ## Node CA certs behind Zscaler
 
