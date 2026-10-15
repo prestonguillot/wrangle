@@ -178,3 +178,30 @@ begin
 end
 
 rm -rf $fix6 $home6 $stubdir6
+
+# ─── Brew drift: options on dumped lines ──────────────────────────────────
+
+set -l f7 (_wrangle_fixture)
+set -l fix7 $f7[1]; set -l home7 $f7[2]
+set -l stubdir7 (mktemp -d)
+
+printf '%s\n' '#!/bin/sh' \
+    'case "$1" in' \
+    '  bundle) printf \'%s\n\' \'brew "fish", link: false\' \'cask "zed", trusted: true\' > "$5" ;;' \
+    '  list) echo fish ;;' \
+    'esac' > $stubdir7/brew
+chmod +x $stubdir7/brew
+
+printf 'brew "fish"\ncask "zed"\n' > $fix7/Brewfile
+git -C $fix7 commit -q -am 'brewfile entries for dump-options test'
+
+begin
+    set -lx HOME $home7
+    set -lx PATH $stubdir7 $PATH
+    set -l out (env WRANGLE_NO_BRANCH_SWITCH=1 $fix7/scripts/wrangle sync --dry-run 2>&1 | string join \n)
+
+    string match -q '*Brewfile matches installed state*' -- "$out"
+    @test "dumped line with options matches the plain Brewfile entry" $status -eq 0
+end
+
+rm -rf $fix7 $home7 $stubdir7
