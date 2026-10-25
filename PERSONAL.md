@@ -42,6 +42,20 @@ fnm default lts-latest
 
 `node --version` should report the LTS now.
 
+## Claude Code (`npm`)
+
+`@anthropic-ai/claude-code` is installed through npm in the Brewfile, so it needs a node version first (see the `fnm` section above). Once `fnm install --lts` has run, `brew bundle install` can install it. Then sign in once per machine:
+
+```fish
+claude
+```
+
+Follow the login prompt on first launch.
+
+## Wireshark capture permissions
+
+`wireshark` (CLI) and `wireshark-app` (GUI) are in my Brewfile. Capturing packets needs access to `/dev/bpf*`, which macOS restricts. Open the Wireshark app once and install the "ChmodBPF" helper when it offers (this prompts for an admin password). Without it Wireshark can open capture files but not capture live traffic.
+
 ## Mac App Store
 
 Sign into the App Store app with the Apple ID that originally purchased my MAS apps (currently just Fantastical, `id: 975937182`). `brew bundle install` will skip MAS lines for unowned apps with a warning rather than failing.
