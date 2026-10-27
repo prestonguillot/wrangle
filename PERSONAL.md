@@ -44,17 +44,15 @@ Verify: `java --version` should print something like `openjdk 26.x.x …`.
 
 If you don't actually want Java on a given machine, remove `brew "openjdk"` and `brew "sbt"` from the Brewfile and uninstall them.
 
-## Temurin 17 (`temurin@17`)
+## Picking a JDK for a project
 
-The Brewfile also installs `temurin@17` (Eclipse Adoptium, per the Homebrew cask description) for projects that need Java 17. It's a `.pkg` cask, so `brew bundle install` will stop for your admin password partway through — run it in a real terminal, not a headless session. The JDK lands at `/Library/Java/JavaVirtualMachines/temurin-17.jdk`.
-
-With this and `openjdk` both installed, `java` alone doesn't tell you which one a build will use. For a project that needs 17, point `JAVA_HOME` at the explicit bundle path rather than a version-only lookup:
+The Brewfile only installs `openjdk` (currently a newer major version than many projects need). If a project needs a different Java major version, install a JDK for that version yourself and point `JAVA_HOME` at its explicit bundle path rather than a version-only lookup like `/usr/libexec/java_home -v <n>`, which matches on version and says nothing about vendor:
 
 ```fish
-set -gx JAVA_HOME /Library/Java/JavaVirtualMachines/temurin-17.jdk/Contents/Home
+set -gx JAVA_HOME <path-to-intended-jdk>/Contents/Home
 ```
 
-Check which JDKs are present with `/usr/libexec/java_home -V`, and confirm the one you picked with `$JAVA_HOME/bin/java -version`. Whether a given distribution is approved for work use isn't something this repo records — check before relying on it.
+Check which JDKs are present with `/usr/libexec/java_home -V`, and confirm the one you picked with `$JAVA_HOME/bin/java -version`. For Homebrew's `openjdk` the path is `(brew --prefix)/opt/openjdk/libexec/openjdk.jdk/Contents/Home`. Whether a given distribution is approved for work use isn't something this repo records — check before relying on it.
 
 ## Mac App Store
 
@@ -180,6 +178,10 @@ security find-certificate -a -c "Zscaler" -p /System/Library/Keychains/SystemRoo
 ```
 
 Regenerate it the same way if the proxy or its cert changes. On a machine without Zscaler, just skip this — the fish config no-ops if the file is missing.
+
+## AltTab (`alt-tab`)
+
+AltTab replaces the macOS window switcher but does nothing useful until macOS grants it permissions. On first launch, approve it in System Settings → Privacy & Security under **Accessibility** and **Screen & System Audio Recording** (the latter is what lets it show window thumbnails), then relaunch it if it doesn't pick them up.
 
 ## Fisher plugins
 
