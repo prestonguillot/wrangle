@@ -32,6 +32,8 @@ for _brew in /opt/homebrew/bin/brew /usr/local/bin/brew
     end
 end
 set -e _brew
+# brew shellenv moves Homebrew to the front of PATH; put ~/bin back ahead of it.
+fish_add_path --path --global --move --prepend $HOME/bin
 
 # Install cask apps into ~/Applications (user-owned) instead of /Applications
 # (root:admin) so GUI-app cask upgrades don't require admin elevation. Note:
@@ -40,7 +42,6 @@ set -gx HOMEBREW_CASK_OPTS "--appdir=$HOME/Applications"
 
 command -q zoxide; and zoxide init fish --cmd cd | source
 command -q direnv; and direnv hook fish | source
-command -q fnm;    and fnm env --use-on-cd | source
 
 # ── Aliases (fish's `alias NAME CMD` is `function NAME; CMD $argv; end`) ──
 # Convention: alias for one-word redirects and simple flag composition;

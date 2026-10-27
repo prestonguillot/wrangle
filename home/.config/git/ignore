@@ -2,6 +2,10 @@
 .DS_Store
 *.orig
 .envrc
+.zed/
+.bloop/
+.metals/
+metals.sbt
 .claude/settings.local.json
 
 **/.claude/settings.local.json

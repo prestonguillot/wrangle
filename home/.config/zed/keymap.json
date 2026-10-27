@@ -1,8 +1,124 @@
+// Context-less bindings rank as deep as Editor ones, so they beat Workspace/Pane bindings;
+// use them only for keys that must win everywhere.
+//
+// `shift-` only combines with letters: cmd-shift-= must be written "cmd-+", cmd-shift-1 "cmd-!", etc.
+// Written as "cmd-shift-1" it never matches.
 [
+  {
+    "bindings": {
+      // Default's context-less `cmd-o` (Open dialog) would shadow a Workspace binding.
+      "cmd-o": "project_symbols::Toggle",
+      // The JetBrains layer nulls shift-escape context-less, which also kills its own CloseActiveDock.
+      "shift-escape": "workspace::CloseActiveDock",
+      "cmd-\"": "workspace::ToggleZoom",
+      "cmd-f2": "debugger::Stop",
+      "cmd-~": null,
+      "ctrl-f2": null,
+      "f6": null,
+      "shift-f9": null,
+      "alt-shift-f9": null
+    }
+  },
   {
     "context": "Workspace",
     "bindings": {
-      "cmd-`": "workspace::ToggleRightDock"
+      "cmd-`": "workspace::ToggleRightDock",
+      "shift shift": "file_finder::Toggle",
+      "cmd-shift-n": "workspace::NewFile",
+      "cmd-t": "git::Pull",
+      "ctrl-alt-d": "debugger::Start",
+      "cmd-n": null,
+      "shift-f10": null,
+      "cmd-f5": null,
+      "f5": ["task::Spawn", { "task_name": "Build" }],
+      "shift-f5": "task::Rerun",
+      "cmd-shift-f5": "debugger::Start"
+    }
+  },
+  {
+    // The JetBrains layer binds tool-window keys in both Workspace and Pane; Pane wins while an editor has focus.
+    "context": "Workspace || Pane || ProjectPanel",
+    "bindings": {
+      "cmd-1": "terminal_panel::Toggle",
+      "cmd-2": ["task::Spawn", { "task_name": "sbt shell" }],
+      "cmd-3": "pane::DeploySearch",
+      "cmd-9": "git_panel::ToggleFocus"
+    }
+  },
+  {
+    "context": "Pane",
+    "bindings": {
+      "alt-cmd-t": null
+    }
+  },
+  {
+    "context": "Editor && mode == full",
+    "bindings": {
+      "cmd-shift-n": "workspace::NewFile",
+      "cmd-j": null
+    }
+  },
+  {
+    "context": "Editor && !agent_diff && !AgentPanel",
+    "bindings": {
+      "cmd-y": null
+    }
+  },
+  {
+    "context": "Editor",
+    "bindings": {
+      "f1": "editor::Hover",
+      "ctrl-j": "editor::Hover",
+      "ctrl-shift-up": "editor::GoToPreviousSymbol",
+      "ctrl-shift-down": "editor::GoToNextSymbol",
+      "cmd-shift-f7": "editor::GoToNextDocumentHighlight",
+      "ctrl-cmd-g": "editor::SelectAllMatches",
+      "cmd-alt-/": "editor::ToggleBlockComments",
+      "cmd-.": "editor::FoldSelectedRanges",
+
+      "cmd-=": "editor::UnfoldLines",
+      "cmd-+": "editor::UnfoldAll",
+      "cmd-_": "editor::FoldAll",
+      "cmd-alt-=": "editor::UnfoldRecursive",
+      "cmd-alt--": "editor::FoldRecursive",
+      // Zed's level N folds the blocks at depth N, so IntelliJ's "expand to level N" is Zed's level N+1.
+      // FoldAtLevel only folds, so each macro unfolds everything (`cmd-+`) and then presses a ctrl-alt-cmd-fN
+      // helper key below. Rebinding `cmd-+` or a helper key breaks these. Don't replay Zed's `cmd-k cmd-N`
+      // chords instead: the JetBrains layer's bare `cmd-k` (git panel) swallows them.
+      "cmd-!": ["workspace::SendKeystrokes", "cmd-+ ctrl-alt-cmd-f2"],
+      "cmd-@": ["workspace::SendKeystrokes", "cmd-+ ctrl-alt-cmd-f3"],
+      "cmd-#": ["workspace::SendKeystrokes", "cmd-+ ctrl-alt-cmd-f4"],
+      "cmd-$": ["workspace::SendKeystrokes", "cmd-+ ctrl-alt-cmd-f5"],
+      "cmd-%": ["workspace::SendKeystrokes", "cmd-+ ctrl-alt-cmd-f6"],
+      "cmd-^": ["workspace::SendKeystrokes", "cmd-+ ctrl-alt-cmd-f7"],
+      "cmd-&": ["workspace::SendKeystrokes", "cmd-+ ctrl-alt-cmd-f8"],
+      "cmd-*": ["workspace::SendKeystrokes", "cmd-+ ctrl-alt-cmd-f9"],
+      "cmd-(": ["workspace::SendKeystrokes", "cmd-+ ctrl-alt-cmd-f10"],
+      "ctrl-alt-cmd-f2": ["editor::FoldAtLevel", 2],
+      "ctrl-alt-cmd-f3": ["editor::FoldAtLevel", 3],
+      "ctrl-alt-cmd-f4": ["editor::FoldAtLevel", 4],
+      "ctrl-alt-cmd-f5": ["editor::FoldAtLevel", 5],
+      "ctrl-alt-cmd-f6": ["editor::FoldAtLevel", 6],
+      "ctrl-alt-cmd-f7": ["editor::FoldAtLevel", 7],
+      "ctrl-alt-cmd-f8": ["editor::FoldAtLevel", 8],
+      "ctrl-alt-cmd-f9": ["editor::FoldAtLevel", 9],
+      "ctrl-alt-cmd-f10": ["editor::FoldAtLevel", 10],
+
+      "f3": "editor::ToggleBookmark",
+      "cmd-f3": "editor::ViewBookmarks",
+      "alt-f3": "editor::ToggleBookmarkWithLabel",
+
+      "cmd-f8": "editor::ToggleBreakpoint",
+      "cmd-shift-f8": "debugger::FocusBreakpointList",
+      "alt-f8": "debugger::EvaluateSelectedText",
+      "alt-f9": "debugger::RunToCursor",
+      "ctrl-alt-d": "debugger::Start",
+      "ctrl-shift-r": "editor::SpawnNearestTask",
+
+      "ctrl-f8": null,
+      "ctrl-shift-f8": null,
+      "ctrl-t": null,
+      "cmd-shift-i": null
     }
   }
 ]

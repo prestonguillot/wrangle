@@ -129,8 +129,6 @@ brew "circleci"
 brew "python@3.12"
 # Chromium-based web browser
 cask "helium-browser"
-# JDK from the Eclipse Foundation (Adoptium)
-cask "temurin@17"
 # Polyglot runtime manager (asdf rust clone)
 brew "mise"
 # Pure Scala Artifact Fetching
@@ -143,3 +141,7 @@ brew "just"
 brew "lefthook"
 # Pinentry for GPG on Mac
 brew "pinentry-mac"
+# Enable Windows-like alt-tab
+cask "alt-tab"
+# ToolHive (thv) is a lightweight, secure, and fast manager for MCP (Model Context Protocol) servers
+cask "stacklok/tap/thv", trusted: true
