@@ -46,13 +46,31 @@ If you don't actually want Java on a given machine, remove `brew "openjdk"` and 
 
 ## Picking a JDK for a project
 
-The Brewfile only installs `openjdk` (currently a newer major version than many projects need). If a project needs a different Java major version, install a JDK for that version yourself and point `JAVA_HOME` at its explicit bundle path rather than a version-only lookup like `/usr/libexec/java_home -v <n>`, which matches on version and says nothing about vendor:
+The Brewfile installs several JDKs:
+
+| Brewfile entry | Java major | Notes |
+| --- | --- | --- |
+| `brew "openjdk"` | newest (currently 26) | Linked by the section above |
+| `brew "openjdk@21"` | 21 | Keg-only |
+| `brew "openjdk@17"` | 17 | Keg-only |
+| `cask "corretto@8"` | 8 | Amazon Corretto; its installer puts the bundle in `/Library/Java/JavaVirtualMachines/` itself, and may ask for your password |
+
+Point `JAVA_HOME` at the explicit bundle path of the JDK a project needs rather than a version-only lookup like `/usr/libexec/java_home -v <n>`, which matches on version and says nothing about vendor:
 
 ```fish
 set -gx JAVA_HOME <path-to-intended-jdk>/Contents/Home
 ```
 
-Check which JDKs are present with `/usr/libexec/java_home -V`, and confirm the one you picked with `$JAVA_HOME/bin/java -version`. For Homebrew's `openjdk` the path is `(brew --prefix)/opt/openjdk/libexec/openjdk.jdk/Contents/Home`. Whether a given distribution is approved for work use isn't something this repo records — check before relying on it.
+Check which JDKs are present with `/usr/libexec/java_home -V`, and confirm the one you picked with `$JAVA_HOME/bin/java -version`. Homebrew's JDKs live at `(brew --prefix)/opt/<formula>/libexec/openjdk.jdk/Contents/Home`, e.g. `(brew --prefix)/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home`. Whether a given distribution is approved for work use isn't something this repo records — check before relying on it.
+
+The versioned formulae are keg-only, so they aren't linked into `/Library/Java/JavaVirtualMachines/` and won't appear in `java_home -V` until you link them. Use a distinct link name so you don't overwrite the `openjdk.jdk` link from the section above:
+
+```fish
+sudo ln -sfn "$(brew --prefix)/opt/openjdk@21/libexec/openjdk.jdk" \
+              /Library/Java/JavaVirtualMachines/openjdk-21.jdk
+```
+
+Skip this if you only ever set `JAVA_HOME` directly from the Homebrew path.
 
 ## Mac App Store
 
