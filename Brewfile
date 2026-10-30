@@ -145,3 +145,9 @@ brew "pinentry-mac"
 cask "alt-tab"
 # ToolHive (thv) is a lightweight, secure, and fast manager for MCP (Model Context Protocol) servers
 cask "stacklok/tap/thv", trusted: true
+# Development kit for the Java programming language
+brew "openjdk@17"
+# Development kit for the Java programming language
+brew "openjdk@21"
+# OpenJDK distribution from Amazon
+cask "corretto@8"
