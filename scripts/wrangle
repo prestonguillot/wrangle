@@ -1300,7 +1300,10 @@ if test "$_subcmd" = merge
         end
 
         set -l present (_merge_brew_present $line)
-        set -l note
+        # Empty string, not an empty list: `(_name $line)$note` below is a
+        # cartesian product in fish, so an empty-list $note erases the whole
+        # line — the prompt then asks about nothing anyone can see.
+        set -l note ""
         if test "$present" = installed
             set note " (already installed)"
         else if test -n "$present"
