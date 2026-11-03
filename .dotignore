@@ -81,3 +81,4 @@ id_*                    # SSH keys via the conventional naming
 .config/gtk-4.0
 .claude.json.tmp*
 
+.gem

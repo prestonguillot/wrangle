@@ -105,3 +105,4 @@ cask "wifiman"
 brew "pinentry-mac"
 cask "alt-tab"
 cask "stacklok/tap/thv", trusted: true
+npm "ccstatusline"

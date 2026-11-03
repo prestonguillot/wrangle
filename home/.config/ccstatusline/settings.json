@@ -5,38 +5,118 @@
       {
         "id": "1",
         "type": "model",
-        "color": "cyan"
+        "color": "brightCyan",
+        "bold": true
       },
       {
         "id": "2",
-        "type": "separator"
+        "type": "separator",
+        "color": "brightBlack",
+        "character": "│"
       },
       {
         "id": "3",
-        "type": "context-length",
-        "color": "brightBlack"
-      },
-      {
-        "id": "4",
-        "type": "separator"
-      },
-      {
-        "id": "5",
-        "type": "git-branch",
+        "type": "thinking-effort",
         "color": "magenta"
       },
       {
+        "id": "4",
+        "type": "separator",
+        "color": "brightBlack",
+        "character": "│"
+      },
+      {
+        "id": "5",
+        "type": "context-bar",
+        "color": "brightBlue"
+      }
+    ],
+    [
+      {
         "id": "6",
-        "type": "separator"
+        "type": "current-working-dir",
+        "color": "blue",
+        "metadata": {
+          "fishStyle": "true"
+        }
       },
       {
         "id": "7",
+        "type": "separator",
+        "color": "brightBlack",
+        "character": "│"
+      },
+      {
+        "id": "8",
+        "type": "git-branch",
+        "color": "green"
+      },
+      {
+        "id": "9",
+        "type": "separator",
+        "color": "brightBlack",
+        "character": "│"
+      },
+      {
+        "id": "10",
+        "type": "git-worktree",
+        "color": "cyan"
+      },
+      {
+        "id": "11",
+        "type": "separator",
+        "color": "brightBlack",
+        "character": "│"
+      },
+      {
+        "id": "12",
         "type": "git-changes",
         "color": "yellow"
       }
     ],
-    [],
-    []
+    [
+      {
+        "id": "13",
+        "type": "custom-text",
+        "color": "brightBlue",
+        "customText": "Session (5h): ",
+        "merge": "no-padding"
+      },
+      {
+        "id": "14",
+        "type": "session-usage",
+        "color": "brightBlue",
+        "rawValue": true,
+        "metadata": {
+          "display": "progress-short"
+        }
+      },
+      {
+        "id": "15",
+        "type": "separator",
+        "color": "brightBlack",
+        "character": "│"
+      },
+      {
+        "id": "16",
+        "type": "reset-timer",
+        "color": "brightBlack"
+      },
+      {
+        "id": "17",
+        "type": "separator",
+        "color": "brightBlack",
+        "character": "│"
+      },
+      {
+        "id": "18",
+        "type": "weekly-usage",
+        "color": "blue",
+        "metadata": {
+          "display": "progress-short"
+        }
+      }
+    ]
   ],
   "flexMode": "full",
   "compactThreshold": 60,
@@ -60,5 +140,6 @@
     "endCaps": [],
     "autoAlign": false,
     "continueThemeAcrossLines": false
-  }
+  },
+  "defaultPadding": " "
 }
