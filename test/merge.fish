@@ -481,6 +481,8 @@ begin
 end
 grep -q '^bundle install' $stub16/brew-calls
 @test "brew adopt (not installed): brew bundle install runs" $status -eq 0
+string replace -ra '\e(\[[0-9;]*m|\(B)' '' < $home16/merge.log | grep -qx '    brew "mergiraf"'
+@test "brew prompt (not installed): names the line it's asking about" $status -eq 0
 rm -rf $fix16 $home16 $stub16
 
 # ─── univ-vars: value changes under a pattern both branches track ──────
