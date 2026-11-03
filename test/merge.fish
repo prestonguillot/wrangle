@@ -291,7 +291,7 @@ grep -q 'PatrickF1/fzf.fish' $home8/dry.log
 # The dry-run banner + summary appear, and the summary counts the candidates.
 # The summary numbers are bold (via _n), so strip ANSI before matching the
 # count line — the escape codes sit between each digit and its word.
-cat $home8/dry.log | string replace -ra '\e\[[0-9;]*m' '' > $home8/dry.txt
+cat $home8/dry.log | string replace -ra '\e(\[[0-9;]*m|\(B)' '' > $home8/dry.txt
 grep -q 'dry run' $home8/dry.txt
 @test "merge --dry-run: prints the dry-run banner" $status -eq 0
 grep -qE '1 dotfile\(s\), 1 brew\(s\), 1 fisher plugin\(s\), 0 univ-var' $home8/dry.txt
@@ -311,7 +311,7 @@ begin
     set -lx HOME $home9
     $fix9/scripts/wrangle merge work --dry-run </dev/null >$home9/dry.log 2>&1
 end
-cat $home9/dry.log | string replace -ra '\e\[[0-9;]*m' '' > $home9/dry.txt
+cat $home9/dry.log | string replace -ra '\e(\[[0-9;]*m|\(B)' '' > $home9/dry.txt
 grep -q 'matches .brewignore' $home9/dry.txt
 @test "merge --dry-run: honors .brewignore in the preview" $status -eq 0
 grep -qE '0 brew\(s\)' $home9/dry.txt
@@ -326,7 +326,7 @@ begin
     set -lx HOME $home10
     $fix10/scripts/wrangle merge work --dry-run </dev/null >$home10/dry.log 2>&1
 end
-string replace -ra '\e\[[0-9;]*m' '' < $home10/dry.log > $home10/dry.txt
+string replace -ra '\e(\[[0-9;]*m|\(B)' '' < $home10/dry.log > $home10/dry.txt
 grep -qF 'home/.config/zed/settings.json (new from source, +1 −0)' $home10/dry.txt
 @test "merge --dry-run: new dotfile listed with its +N −M count" $status -eq 0
 rm -rf $fix10 $home10
@@ -347,7 +347,7 @@ begin
     set -lx PATH $stubdir11 $PATH
     printf 'd\na\ns\ns\n' | $fix11/scripts/wrangle merge work >$home11/merge.log 2>&1
 end
-string replace -ra '\e\[[0-9;]*m' '' < $home11/merge.log > $home11/merge.txt
+string replace -ra '\e(\[[0-9;]*m|\(B)' '' < $home11/merge.log > $home11/merge.txt
 grep -qx '      +++ source/home/.config/zed/settings.json' $home11/merge.txt
 @test "merge [d]iff (new file): labels the source side" $status -eq 0
 grep -qx '      +{"theme": "ayu-dark"}' $home11/merge.txt
@@ -369,7 +369,7 @@ begin
     set -lx HOME $home12
     printf 'd\nk\ns\ns\n' | $fix12/scripts/wrangle merge work >$home12/merge.log 2>&1
 end
-string replace -ra '\e\[[0-9;]*m' '' < $home12/merge.log > $home12/merge.txt
+string replace -ra '\e(\[[0-9;]*m|\(B)' '' < $home12/merge.log > $home12/merge.txt
 grep -qx '      -{"theme": "sonokai"}' $home12/merge.txt
 and grep -qx '      +{"theme": "ayu-dark"}' $home12/merge.txt
 @test "merge [d]iff (conflict): shows mine as removed, source as added" $status -eq 0
@@ -398,7 +398,7 @@ begin
     fish -c 'set -U tide_color old'
     printf 's\ns\ns\nd\ns\n' | $fix13/scripts/wrangle merge work >$home13/merge.log 2>&1
 end
-string replace -ra '\e\[[0-9;]*m' '' < $home13/merge.log > $home13/merge.txt
+string replace -ra '\e(\[[0-9;]*m|\(B)' '' < $home13/merge.log > $home13/merge.txt
 grep -qx '      -tide_color\[1\] = old' $home13/merge.txt
 and grep -qx '      +tide_color\[1\] = new' $home13/merge.txt
 @test "merge [d]iff (univ): changed var shows live → source" $status -eq 0

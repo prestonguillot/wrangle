@@ -116,7 +116,7 @@ begin
     printf 'd\ns\n' | env WRANGLE_NO_BRANCH_SWITCH=1 WRANGLE_NO_COMMIT=1 WRANGLE_NO_PUSH=1 \
         $fix/scripts/wrangle sync >$home_dir/run.log 2>&1
 end
-string replace -ra '\e\[[0-9;]*m' '' < $home_dir/run.log > $home_dir/run.txt
+string replace -ra '\e(\[[0-9;]*m|\(B)' '' < $home_dir/run.log > $home_dir/run.txt
 
 grep -qx '      +++ ~/.config/newapp/conf' $home_dir/run.txt
 @test "sync [d]iff: labels the file by its ~ path" $status -eq 0
