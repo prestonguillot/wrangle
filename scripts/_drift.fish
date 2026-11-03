@@ -280,9 +280,15 @@ function _wrangle_detect_drift --argument-names mode
             continue
         end
         # Prompt + responses sit at 4sp to nest visually under the _show subheader.
+        # [d]iff shows the whole path as added: tracking copies all of it into
+        # the repo, and _show only previews the first few lines.
+        _wrangle_diff_reset
+        set -l prompt "    [t]rack / [d]iff / [i]gnore forever / [s]kip / [q]uit > "
         while true
-            read -P (_keys "    [t]rack / [i]gnore forever / [s]kip / [q]uit > ") choice
+            read -P (_keys $prompt) choice
             switch $choice
+                case d D diff
+                    _wrangle_diff_toggle "      " $prompt $choice _wrangle_diff_render "" $HOME/$rel $rel repo/home "~"
                 case t T track
                     _track $rel
                     set -l rv $status
@@ -308,7 +314,7 @@ function _wrangle_detect_drift --argument-names mode
                 case q Q quit
                     _wrangle_abort quit
                 case '*'
-                    echo "      ? '$choice' — answer t/i/s/q"
+                    echo "      ? '$choice' — answer t/d/i/s/q"
             end
         end
 
@@ -565,6 +571,23 @@ function _wrangle_detect_drift --argument-names mode
         mv $tmp $univ_output_file
     end
 
+    # [d]iff renderers for the univ-var prompts. `-` is the live shell.
+    #   conflict: live value vs the repo value [a]pply would set
+    #   capture:  nothing vs the lines [t]rack would add to the export file
+    function _univ_conflict_diff --argument-names file name
+        set -l tmp (mktemp -d)
+        _wrangle_univ_format - $name > $tmp/live
+        _wrangle_univ_format $file $name > $tmp/repo
+        _wrangle_diff_render $tmp/live $tmp/repo "universal variables" live repo
+        rm -rf $tmp
+    end
+    function _univ_capture_diff
+        set -l tmp (mktemp)
+        _wrangle_univ_format - $argv > $tmp
+        _wrangle_diff_render "" $tmp home/.config/fish/exported-univ-vars.fish repo repo
+        rm -f $tmp
+    end
+
     # Load allowlist / blocklist patterns once — shared by both sub-passes
     # (skip comments + blanks).
     set -l allowed_patterns
@@ -657,9 +680,13 @@ function _wrangle_detect_drift --argument-names mode
                 echo "    "(_name $name)" — value differs:"
                 echo "      live: "(_dim)(string join " " $live_values)(_rs)
                 echo "      repo: "(_dim)(string join " " $repo_values)(_rs)
+                _wrangle_diff_reset
+                set -l prompt "    [a]pply repo value (overwrite local) / [k]eep local / [d]iff / [s]kip / [q]uit > "
                 while true
-                    read -P (_keys "    [a]pply repo value (overwrite local) / [k]eep local / [s]kip / [q]uit > ") choice
+                    read -P (_keys $prompt) choice
                     switch $choice
+                        case d D diff
+                            _wrangle_diff_toggle "      " $prompt $choice _univ_conflict_diff $univ_output_file $name
                         case a A apply
                             set -U --erase $name
                             set -U $name $repo_values
@@ -679,7 +706,7 @@ function _wrangle_detect_drift --argument-names mode
                         case q Q quit
                             _wrangle_abort quit
                         case '*'
-                            echo "      ? '$choice' — answer a/k/s/q"
+                            echo "      ? '$choice' — answer a/k/d/s/q"
                     end
                 end
             end
@@ -772,9 +799,13 @@ function _wrangle_detect_drift --argument-names mode
             if test "$mode" = report
                 continue
             end
+            _wrangle_diff_reset
+            set -l prompt "    [t]rack pattern / [d]iff / [i]gnore forever / [s]kip / [q]uit > "
             while true
-                read -P (_keys "    [t]rack pattern / [i]gnore forever / [s]kip / [q]uit > ") choice
+                read -P (_keys $prompt) choice
                 switch $choice
+                    case d D diff
+                        _wrangle_diff_toggle "      " $prompt $choice _univ_capture_diff $members
                     case t T track
                         echo "$prefix*" >> $univ_export_file
                         echo "      $GLYPH_OK added `$prefix*` to .univexport"
@@ -797,7 +828,7 @@ function _wrangle_detect_drift --argument-names mode
                     case q Q quit
                         _wrangle_abort quit
                     case '*'
-                        echo "      ? '$choice' — answer t/i/s/q"
+                        echo "      ? '$choice' — answer t/d/i/s/q"
                 end
             end
         end
@@ -809,9 +840,13 @@ function _wrangle_detect_drift --argument-names mode
             if test "$mode" = report
                 continue
             end
+            _wrangle_diff_reset
+            set -l prompt "    [t]rack exact name / [d]iff / [i]gnore forever / [s]kip / [q]uit > "
             while true
-                read -P (_keys "    [t]rack exact name / [i]gnore forever / [s]kip / [q]uit > ") choice
+                read -P (_keys $prompt) choice
                 switch $choice
+                    case d D diff
+                        _wrangle_diff_toggle "      " $prompt $choice _univ_capture_diff $name
                     case t T track
                         echo $name >> $univ_export_file
                         echo "      $GLYPH_OK added `$name` to .univexport"
@@ -831,7 +866,7 @@ function _wrangle_detect_drift --argument-names mode
                     case q Q quit
                         _wrangle_abort quit
                     case '*'
-                        echo "      ? '$choice' — answer t/i/s/q"
+                        echo "      ? '$choice' — answer t/d/i/s/q"
                 end
             end
         end
