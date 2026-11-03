@@ -43,6 +43,75 @@
 # nothing in report mode, so keeping them out here means status cannot
 # reach them at all — no gate required.
 
+# Untracked entries inside directories home/ already tracks, as absolute
+# paths for the dotfile pass's scan list.
+#
+# The top-level scan only looks at ~/.<name> and ~/.config/<name>. Once
+# ~/.config/fish is tracked, it's never a candidate again — and nothing
+# looked inside it, so a hand-written ~/.config/fish/functions/foo.fish
+# was never offered and never reached another machine. (That's how a tide
+# prompt item lived only on the machine where it was written, while the
+# tide settings naming it synced everywhere and broke the prompt.)
+#
+# Walks every directory under home/ below the top level, and lists what
+# the matching directory in ~ holds that home/ doesn't. Filtered:
+#   - symlinks (stow's own links, or the user's)
+#   - ~ directories that are themselves symlinks (stow folded them; new
+#     files there already land in the repo)
+#   - files fisher installed — fisher owns them and reinstalls them from
+#     fish_plugins; it lists them in the _fisher_*_files universals
+#   - fish_variables — fish's universal-variable store; univ-vars sync
+#     through .univexport instead
+#   - directories with no files in them (nothing to track)
+# A new directory holding any fisher-installed file isn't offered whole —
+# that would move fisher's files into the repo. Its other files are
+# offered one by one instead.
+#
+# .dotignore and stow-hazard checks happen in the caller, same as for the
+# top-level entries.
+function _wrangle_drift_nested_scan --argument-names home_subdir
+    set -l fisher_files
+    for v in (set -U -n | string match '_fisher_*_files')
+        set -a fisher_files (string replace -r '^~' $HOME -- $$v)
+    end
+
+    for d in (find $home_subdir -mindepth 2 -type d 2>/dev/null) \
+             (find $home_subdir -mindepth 1 -maxdepth 1 -type d ! -name .config 2>/dev/null)
+        set -l rel (string replace -- $home_subdir/ '' $d)
+        set -l live $HOME/$rel
+        test -d $live; or continue
+        test -L $live; and continue
+        _wrangle_drift_nested_entries $live $home_subdir $fisher_files
+    end
+end
+
+# One directory's untracked entries, for _wrangle_drift_nested_scan.
+function _wrangle_drift_nested_entries --argument-names live home_subdir
+    set -l fisher_files $argv[3..-1]
+    for e in $live/* $live/.*
+        test -L $e; and continue
+        test -e $e; or continue
+        set -l erel (string replace -- $HOME/ '' $e)
+        test -e $home_subdir/$erel; or test -L $home_subdir/$erel; and continue
+        contains -- $e $fisher_files; and continue
+        test (basename $e) = fish_variables; and continue
+
+        if test -d $e
+            set -l files (find $e -type f 2>/dev/null)
+            test (count $files) -gt 0; or continue
+            set -l has_fisher no
+            for f in $files
+                contains -- $f $fisher_files; and set has_fisher yes; and break
+            end
+            if test "$has_fisher" = yes
+                _wrangle_drift_nested_entries $e $home_subdir $fisher_files
+                continue
+            end
+        end
+        echo $e
+    end
+end
+
 function _wrangle_detect_drift --argument-names mode
     # Reject an unknown or missing mode loudly. Every gate below tests for
     # `report`, so an empty or misspelled $mode would fall through to the
@@ -202,6 +271,9 @@ function _wrangle_detect_drift --argument-names mode
     for f in $HOME/.config/*
         set -a scan $f
     end
+    # Plus new entries inside directories home/ already tracks (see
+    # _wrangle_drift_nested_scan below for why and what's filtered).
+    set -a scan (_wrangle_drift_nested_scan $home_subdir)
 
     set -l candidates
     set -l blocked
