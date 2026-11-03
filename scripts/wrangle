@@ -38,8 +38,9 @@
 #   [i]gnore         — append to the per-pass skiplist (.dotignore / .brewignore /
 #                      .fisherignore / .univignore); leaves local state alone
 #   [k]eep mine      — keep current branch's value (wrangle merge conflict)
-#   [d]iff           — expand the change in line; press again to collapse
+#   [tab] diff       — expand the change in line; tab again collapses (no Enter)
 #                      (merge dotfiles + univ-vars, sync dotfiles + univ-vars)
+#   [d]iff           — show the full push diff (sync push prompt)
 #   [r]emove         — yoink/drop from the repo
 #   [s]kip           — leave alone; ask again next run
 #   [q]uit
@@ -239,10 +240,10 @@ function _wrangle_help_merge
     echo "doesn't have (or has with different contents), prompts what to do."
     echo ""
     echo "Prompts for new items: [a]dopt / skip [f]orever / [s]kip / [q]uit."
-    echo "  Dotfiles and univ-var patterns also offer [d]iff: it expands what"
-    echo "  adopting would change in line (a new file shows as all added lines);"
-    echo "  press [d] again to collapse it. Diffs too tall for the terminal open"
-    echo "  in less instead — quit it to return to the prompt."
+    echo "  Dotfiles and univ-var patterns also offer [tab] diff: Tab expands what"
+    echo "  adopting would change in line (a new file shows as all added lines),"
+    echo "  and Tab again collapses it — no Enter needed. Diffs too tall for the"
+    echo "  terminal open in less instead; quit it to return to the prompt."
     echo "  `skip [f]orever` appends the item to .merge-skip; future merges"
     echo "  silently skip it. Bypass with --force."
     echo ""
@@ -413,7 +414,7 @@ source $repo/scripts/_commit_msg.fish    # commit-message builder (plain path)
 source $repo/scripts/_drift.fish         # _wrangle_detect_drift — Passes 5-8
 source $repo/scripts/_nag_state.fish     # pull-nag state file format + path
 source $repo/scripts/_stow_guard.fish    # unstowable-path detection + stow runner
-source $repo/scripts/_diff_view.fish     # [d]iff expand/collapse for merge + sync prompts
+source $repo/scripts/_diff_view.fish     # [tab] diff expand/collapse for merge + sync prompts
 
 # Return the configured machine-branch for this clone, defaulting to `personal`.
 # Inlined (used to live in scripts/_chain.fish, but that file's other helpers
@@ -632,6 +633,12 @@ end
 function _wrangle_abort --argument-names reason exit_code
     test -z "$exit_code"; and set exit_code 0
     _spinner_stop   # clear any half-rendered spinner before our message
+    # Interrupted mid-prompt: _wrangle_ask had the terminal in no-echo,
+    # byte-at-a-time mode. Put it back before the shell gets it.
+    if set -q _wrangle_stty_saved
+        stty $_wrangle_stty_saved </dev/tty 2>/dev/null
+        set -e _wrangle_stty_saved
+    end
     echo ""
     echo "  $GLYPH_DIM $reason — exiting without committing or pushing. Re-run wrangle to commit any tracked changes."
     exit $exit_code
@@ -923,7 +930,7 @@ if test "$_subcmd" = merge
     end
 
     # Render the diff for one dotfile: what this branch has (or nothing) vs
-    # what adopting would write. Used by [d]iff and by the dry-run counts.
+    # what adopting would write. Used by [tab] diff and by the dry-run counts.
     function _merge_dot_diff --argument-names source path repo
         set -l tmp (mktemp)
         git show $source:$path > $tmp 2>/dev/null
@@ -1005,13 +1012,11 @@ if test "$_subcmd" = merge
                 continue
             end
             echo "    "(_name $path)" (new from source)"
-            _wrangle_diff_reset
-            set -l prompt "    [a]dopt / [d]iff / skip [f]orever / [s]kip / [q]uit > "
+            set -l prompt "    [a]dopt / [tab] diff / skip [f]orever / [s]kip / [q]uit > "
             while true
-                read -P (_keys $prompt) choice
+                _wrangle_ask "      " $prompt _merge_dot_diff $source $path $repo
+                set -l choice $_wrangle_answer
                 switch $choice
-                    case d D diff
-                        _wrangle_diff_toggle "      " $prompt $choice _merge_dot_diff $source $path $repo
                     case a A adopt
                         mkdir -p (dirname $repo/$path)
                         git show $source:$path > $repo/$path
@@ -1044,10 +1049,10 @@ if test "$_subcmd" = merge
                 continue
             end
             echo "    "(_name $path)" (differs from source)"
-            _wrangle_diff_reset
-            set -l prompt "    [a]dopt source / [k]eep mine / [d]iff / [s]kip / [q]uit > "
+            set -l prompt "    [a]dopt source / [k]eep mine / [tab] diff / [s]kip / [q]uit > "
             while true
-                read -P (_keys $prompt) choice
+                _wrangle_ask "      " $prompt _merge_dot_diff $source $path $repo
+                set -l choice $_wrangle_answer
                 switch $choice
                     case a A adopt
                         git show $source:$path > $repo/$path
@@ -1058,8 +1063,6 @@ if test "$_subcmd" = merge
                     case k K keep
                         echo "      $GLYPH_OK kept local"
                         break
-                    case d D diff
-                        _wrangle_diff_toggle "      " $prompt $choice _merge_dot_diff $source $path $repo
                     case s S skip ''
                         echo "      $GLYPH_DIM skipped (will resurface next merge)"
                         break
@@ -1234,13 +1237,11 @@ if test "$_subcmd" = merge
             continue
         end
         echo "    "(_name $pat)" (new pattern from source)"
-        _wrangle_diff_reset
-        set -l prompt "    [a]dopt (append + apply matching vars) / [d]iff / skip [f]orever / [s]kip / [q]uit > "
+        set -l prompt "    [a]dopt (append + apply matching vars) / [tab] diff / skip [f]orever / [s]kip / [q]uit > "
         while true
-            read -P (_keys $prompt) choice
+            _wrangle_ask "      " $prompt _merge_univ_diff $source $pat
+            set -l choice $_wrangle_answer
             switch $choice
-                case d D diff
-                    _wrangle_diff_toggle "      " $prompt $choice _merge_univ_diff $source $pat
                 case a A adopt
                     echo $pat >> $repo/.univexport
                     # Apply matching vars from source's exported file into live shell.
