@@ -38,6 +38,7 @@
 #   [i]gnore         — append to the per-pass skiplist (.dotignore / .brewignore /
 #                      .fisherignore / .univignore); leaves local state alone
 #   [k]eep mine      — keep current branch's value (wrangle merge conflict)
+#   [m]erge          — open the git mergetool on base / mine / source (wrangle merge dotfile)
 #   [tab] diff       — expand the change in line; tab again collapses (no Enter)
 #                      (merge dotfiles + univ-vars, sync dotfiles + univ-vars)
 #   [d]iff           — show the full push diff (sync push prompt)
@@ -247,6 +248,17 @@ function _wrangle_help_merge
     echo "  `skip [f]orever` appends the item to .merge-skip; future merges"
     echo "  silently skip it. Bypass with --force."
     echo ""
+    echo "Dotfiles both branches have, with different contents:"
+    echo "  [a]dopt source / [m]erge / [k]eep mine / [tab] diff / [s]kip / [q]uit."
+    echo "  [m]erge opens your git merge tool (merge.tool — the one `git mergetool`"
+    echo "  uses) on base / yours / source. Save and close it; wrangle shows what"
+    echo "  the result changes and writes it when you confirm."
+    echo "  The base is the source's version from the last merge of that file,"
+    echo "  remembered in .merge-base. If the source hasn't changed a file since"
+    echo "  then, it isn't offered — your own edits and changes you kept out stay"
+    echo "  out of the way. With no base yet (a file's first merge), the tool has"
+    echo "  nothing to start from, so expect to resolve every difference once."
+    echo ""
     echo "Add-only by default: items YOU have that <branch> doesn't are left"
     echo "alone. Items matching the current branch's .ignore files are skipped"
     echo "with a one-line note. Framework files (scripts/, README.md, etc.) are"
@@ -269,7 +281,7 @@ function _wrangle_help_merge
     echo ""
     echo "Options:"
     echo "  -d, --dry-run  preview what would be adopted; change nothing, don't commit"
-    echo "  -f, --force    bypass .merge-skip (re-prompt items previously marked skip [f]orever)"
+    echo "  -f, --force    bypass .merge-skip and .merge-base (re-offer everything)"
 end
 
 function _wrangle_help_push
@@ -423,6 +435,7 @@ source $repo/scripts/_drift.fish         # _wrangle_detect_drift — Passes 5-8
 source $repo/scripts/_nag_state.fish     # pull-nag state file format + path
 source $repo/scripts/_stow_guard.fish    # unstowable-path detection + stow runner
 source $repo/scripts/_diff_view.fish     # [tab] diff expand/collapse for merge + sync prompts
+source $repo/scripts/_merge_base.fish    # merge's remembered bases + git mergetool launch
 
 # Return the configured machine-branch for this clone, defaulting to `personal`.
 # Inlined (used to live in scripts/_chain.fish, but that file's other helpers
@@ -963,6 +976,61 @@ if test "$_subcmd" = merge
         end
     end
 
+    # [m]erge for one dotfile: hand base / mine / source to the user's git
+    # mergetool, show what the result changes, and write it on confirmation.
+    # Returns 0 written, 1 abandoned (caller re-prompts), 2 result equals
+    # this machine's copy (nothing to write; base recorded).
+    function _merge_dot_mergetool --argument-names source src_arg path src_sha base_sha repo
+        set -l tmpd (mktemp -d)
+        git show $source:$path > $tmpd/source
+        set -l base_file
+        if test -n "$base_sha"
+            git cat-file -p $base_sha > $tmpd/base
+            set base_file $tmpd/base
+        end
+
+        set -l tool (git config merge.tool)
+        test -n "$tool"; or set tool "git mergetool"
+        echo "      $GLYPH_DIM opening $tool — save and close it to come back here"
+        if not _wrangle_mergetool "$base_file" $repo/$path $tmpd/source $path $tmpd/result
+            echo "      $GLYPH_WARN merge not finished — nothing changed"
+            rm -rf $tmpd
+            return 1
+        end
+
+        if cmp -s $tmpd/result $repo/$path
+            _merge_record_base $src_arg $path $src_sha
+            echo "      $GLYPH_OK merged result is identical to yours — nothing to write"
+            rm -rf $tmpd
+            return 2
+        end
+
+        # What the merge would change in this machine's file.
+        test -t 1; and set -g _wrangle_diff_color always
+        set -l lines (_wrangle_diff_render $repo/$path $tmpd/result $path mine merged)
+        set -e _wrangle_diff_color
+        echo ""
+        printf '        %s\n' $lines
+        echo ""
+        while true
+            read -P (_keys "      write the merged file? [y]es / [n]o > ") ok; or set ok n
+            switch $ok
+                case y Y yes
+                    cp $tmpd/result $repo/$path
+                    _merge_record_base $src_arg $path $src_sha
+                    echo "      $GLYPH_OK wrote the merged file"
+                    rm -rf $tmpd
+                    return 0
+                case n N no ''
+                    echo "      $GLYPH_DIM discarded the merge — nothing changed"
+                    rm -rf $tmpd
+                    return 1
+                case '*'
+                    echo "      ? '$ok' — answer y/n"
+            end
+        end
+    end
+
     # "+N −M" from a rendered diff, for the dry-run listing.
     function _merge_diff_counts
         set -l plain (string replace -ra '\e\[[0-9;]*m' '' -- $argv)
@@ -1021,7 +1089,18 @@ if test "$_subcmd" = merge
         return 1
     end
 
+    # Record the source's blob as this path's merge base (see
+    # scripts/_merge_base.fish). Notes whether .merge-base changed, so a run
+    # that only kept or re-confirmed files still commits it.
+    function _merge_record_base --argument-names src path sha
+        _wrangle_merge_base_set $repo/.merge-base $src $path $sha
+        and set -g _merge_base_changed yes
+    end
+
     # Reset counters used in summary.
+    set -g _merge_base_changed no
+    set -g _merge_dot_merged 0
+    set -g _merge_dot_kept 0
     set -g _merge_dot_adopted 0
     set -g _merge_brew_adopted 0
     set -g _merge_fisher_adopted 0
@@ -1046,8 +1125,8 @@ if test "$_subcmd" = merge
             echo "    $GLYPH_DIM skipping "(_name $rel)" (matches .dotignore)"
             continue
         end
-        # Honor .merge-skip (merge-only sticky skips). Only existence is
-        # tracked; content conflicts re-prompt every run by design.
+        # Honor .merge-skip (merge-only sticky skips). Content differences
+        # are governed by .merge-base instead (see scripts/_merge_base.fish).
         if _merge_is_skipped dotfile $path $merge_skip_entries
             echo "    $GLYPH_DIM skipping "(_name $path)" (matches .merge-skip)"
             continue
@@ -1057,6 +1136,17 @@ if test "$_subcmd" = merge
         set -l current_blob
         if test -f $repo/$path
             set current_blob (cat $repo/$path | string collect)
+        end
+
+        # The source's version now, and the one this machine last merged.
+        # --force ignores recorded bases, so everything is offered again.
+        set -l src_sha (git rev-parse $source:$path 2>/dev/null)
+        set -l base_sha
+        if test "$_force" = no
+            set base_sha (_wrangle_merge_base_get $repo/.merge-base $src_arg $path)
+            if test -n "$base_sha"; and not git cat-file -e $base_sha 2>/dev/null
+                set base_sha
+            end
         end
 
         if test -z "$current_blob"
@@ -1076,6 +1166,7 @@ if test "$_subcmd" = merge
                     case a A adopt
                         mkdir -p (dirname $repo/$path)
                         git show $source:$path > $repo/$path
+                        _merge_record_base $src_arg $path $src_sha
                         set _merge_dot_adopted (math $_merge_dot_adopted + 1)
                         set _merge_need_restow yes
                         _log_change "adopted dotfile from $source: $rel"
@@ -1097,26 +1188,59 @@ if test "$_subcmd" = merge
             end
             set dot_total (math $dot_total + 1)
         else if test "$current_blob" != "$src_blob"
-            # Conflict: prompt with 4 options.
+            # Source unchanged since this machine last merged it: whatever
+            # differs is this machine's own doing (its edits, or source
+            # changes declined last time). Nothing new to offer.
+            if test -n "$base_sha"; and test "$base_sha" = "$src_sha"
+                echo "    $GLYPH_DIM skipping "(_name $path)" (unchanged on source since the last merge)"
+                continue
+            end
+            set -l why
+            if test -z "$base_sha"
+                set why "first merge of this file"
+            else if test (git hash-object -- $repo/$path) = "$base_sha"
+                set why "changed on source since the last merge"
+            else
+                set why "changed on both sides since the last merge"
+            end
+
             echo ""
             if test "$_dry_run" = yes
-                echo "    "(_name $path)" (differs from source, "(_merge_diff_counts (_merge_dot_diff $source $path $repo))")"
+                echo "    "(_name $path)" (differs from source — $why, "(_merge_diff_counts (_merge_dot_diff $source $path $repo))")"
                 set dot_total (math $dot_total + 1)
                 continue
             end
-            echo "    "(_name $path)" (differs from source)"
-            set -l prompt "    [a]dopt source / [k]eep mine / [tab] diff / [s]kip / [q]uit > "
+            echo "    "(_name $path)" (differs from source — $why)"
+            set -l prompt "    [a]dopt source / [m]erge / [k]eep mine / [tab] diff / [s]kip / [q]uit > "
             while true
                 _wrangle_ask "      " $prompt _merge_dot_diff $source $path $repo
                 set -l choice $_wrangle_answer
                 switch $choice
                     case a A adopt
                         git show $source:$path > $repo/$path
+                        _merge_record_base $src_arg $path $src_sha
                         set _merge_dot_adopted (math $_merge_dot_adopted + 1)
                         _log_change "adopted dotfile from $source: $rel (overwrote local)"
                         echo "      $GLYPH_OK adopted source's version"
                         break
+                    case m M merge
+                        _merge_dot_mergetool $source $src_arg $path $src_sha "$base_sha" $repo
+                        set -l mrv $status
+                        # 0 written, 1 abandoned (re-prompt), 2 result == mine
+                        if test $mrv -eq 0
+                            set _merge_dot_adopted (math $_merge_dot_adopted + 1)
+                            set _merge_dot_merged (math $_merge_dot_merged + 1)
+                            _log_change "merged dotfile from $source: $rel"
+                            break
+                        else if test $mrv -eq 2
+                            set _merge_dot_kept (math $_merge_dot_kept + 1)
+                            break
+                        end
                     case k K keep
+                        # Recorded, so the same source changes aren't offered
+                        # again — only what the source changes from here on.
+                        _merge_record_base $src_arg $path $src_sha
+                        set _merge_dot_kept (math $_merge_dot_kept + 1)
                         echo "      $GLYPH_OK kept local"
                         break
                     case s S skip ''
@@ -1125,12 +1249,15 @@ if test "$_subcmd" = merge
                     case q Q quit
                         _wrangle_abort quit
                     case '*'
-                        echo "      ? '$choice' — answer a/k/d/s/q"
+                        echo "      ? '$choice' — answer a/m/k/d/s/q"
                 end
             end
             set dot_total (math $dot_total + 1)
+        else if test "$_dry_run" = no
+            # Identical: nothing to prompt. Still record the base, so the
+            # first change the source makes later merges three-way.
+            _merge_record_base $src_arg $path $src_sha
         end
-        # Identical → silent skip, doesn't increment dot_total.
     end
     if test $dot_total -eq 0
         echo "    $GLYPH_OK no dotfile drift to merge"
@@ -1465,7 +1592,7 @@ if test "$_subcmd" = merge
     # ── End: commit if anything was adopted ────────────────────────────
     set -l total (math $_merge_dot_adopted + $_merge_brew_adopted + $_merge_fisher_adopted + $_merge_univ_adopted)
     echo ""
-    if test $total -eq 0
+    if test $total -eq 0; and test "$_merge_base_changed" = no
         echo "  $GLYPH_OK no adoptions from $source — nothing to commit"
         popd >/dev/null
         exit 0
@@ -1492,6 +1619,12 @@ if test "$_subcmd" = merge
     end
 
     set -l commit_msg "wrangle: merge from $source: $_merge_dot_adopted dotfile(s), $_merge_brew_adopted brew(s), $_merge_fisher_adopted fisher plugin(s), $_merge_univ_adopted univ-var pattern(s)"
+    if test $_merge_dot_merged -gt 0; or test $_merge_dot_kept -gt 0
+        set commit_msg "$commit_msg; dotfiles: $_merge_dot_merged merged, $_merge_dot_kept kept local"
+    end
+    if test $total -eq 0
+        set commit_msg "wrangle: merge from $source: nothing adopted; recorded merge bases"
+    end
     _with_spinner "Committing…" git commit -m "$commit_msg"
     echo "  $GLYPH_OK committed: $commit_msg"
 
