@@ -1,0 +1,30 @@
+# Merge bases for `wrangle merge` (maintained by wrangle; see
+# scripts/_merge_base.fish). One line per source branch and dotfile:
+# the source's version as of the last merge from it.
+#
+#   <source-branch> <path> <blob-sha>
+work home/.config/btop/btop.conf 8d7c198094e9d10e45fa02b44ecc5154c7a31ad3
+work home/.config/ccstatusline/settings.json d5ac613c4e7e39ce2d5979aee92195b2a500a179
+work home/.config/fish/conf.d/blank_line_before_output.fish 96edb7d84d35040375b6ab20255c0f87c88a3681
+work home/.config/ghostty/config 907df281e7cf5b057e119965a8742e9835c9fd50
+work home/.config/git/ignore f9e1c7f61fdf384e28eb5329b6415e7912370956
+work home/.config/htop/htoprc 9eb8eea3a9e4f61d9d627e1fbc15b83e073945b8
+work home/.config/nvim/.gitignore cc5457ab807fad274a186d863d5b7c225948363d
+work home/.config/nvim/.neoconf.json 7c480874658bdf329eb36d3e5aabd9bf9e0636a6
+work home/.config/nvim/LICENSE 261eeb9e9f8b2b4b0d119366dda99c6fd7d35c64
+work home/.config/nvim/README.md 185280b0165c72d6005b4a319a8fc7ab40eada49
+work home/.config/nvim/init.lua 2514f9ed90d831793ec8b5ca4666040996d01e09
+work home/.config/nvim/lazy-lock.json 36171b9795db2373d6399e35b8589580c6c433ec
+work home/.config/nvim/lazyvim.json f46db8a77f826742c32063a90d847ea681d63798
+work home/.config/nvim/lua/config/autocmds.lua 4221e75867a5413b47250a33fcc7bab4afd406ad
+work home/.config/nvim/lua/config/keymaps.lua d3dbe16f0514b4c8aa2b78c2d60e235d62a6c416
+work home/.config/nvim/lua/config/lazy.lua d73bfa104703557f2cb466d9c89485ae1d4f7be0
+work home/.config/nvim/lua/config/options.lua 4ca7052582b2ef739515a1da350987374bc3652f
+work home/.config/nvim/lua/plugins/colorscheme.lua 6a0a165d13e5c4990ad5d2cf01c55135eaa7e305
+work home/.config/nvim/lua/plugins/example.lua 17f53d6f6f2429f0b13a07cdc8f4a63bcdc947a4
+work home/.config/nvim/stylua.toml 5d6c50dce955fe8b2d86106d4cc4616f5fc2fd59
+work home/.config/zed/keymap.json 1bc4d00f6082806ce41fcbc0da4cf4e469acb7ec
+work home/.config/zed/settings.json b07245c89adf61c2af6d614d970dc628904427ed
+work home/.gitignore_global 2a4c0b8f5d12af6f969bbc2d0ae5623ac6019cad
+work home/.vim/colors/sonokai.vim 031f1eded89175a92e1b03b1167a2eb5a7d0b3c6
+work home/.vim/vimrc 42bcc02885a2a7ef0cc379d750ded114c6f80cd3

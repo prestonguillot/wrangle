@@ -39,3 +39,10 @@ brew brew "just"
 brew brew "openjdk@17"
 brew brew "openjdk@21"
 brew cask "corretto@8"
+dotfile home/.jetbrains/acp.json
+dotfile home/.zprofile
+dotfile home/.zshenv
+dotfile home/.zshrc
+dotfile home/.config/mise/config.toml
+brew brew "gum"
+brew brew "lefthook"
