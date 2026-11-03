@@ -144,8 +144,8 @@ grep -q 'skipping home/.config/app/conf (unchanged on source since the last merg
 
 # --force ignores the base and offers it again.
 _mb_merge 's\n' --force
-grep -q 'home/.config/app/conf (differs from source — first merge of this file)' $home_dir/run.txt
-@test "merge --force: ignores recorded bases" $status -eq 0
+grep -q 'home/.config/app/conf (differs from source — unchanged on source since the last merge — offered because of --force)' $home_dir/run.txt
+@test "merge --force: offers files the source hasn't changed" $status -eq 0
 
 # [k]eep records the base: the declined change isn't offered again.
 git -C $fix checkout -q work
@@ -183,3 +183,72 @@ test "$(cat $fix/home/.config/app/conf | string collect)" = "$before"
 @test "merge [m]erge then [n]o: file unchanged" $status -eq 0
 
 rm -rf $fix $home_dir $stub
+
+# ─── no recorded base: fall back to the version both histories share ────
+# The file starts identical on main, both branches edit different lines,
+# and no .merge-base exists. The shared version from main is the base, so
+# the stub tool (git merge-file) merges cleanly.
+
+set -l fix2 (mktemp -d)
+set -l home2 (_mb_home)
+set -l stub2 (mktemp -d)
+printf '#!/bin/sh\nexit 0\n' > $stub2/brew
+printf '#!/bin/sh\nexit 0\n' > $stub2/stow
+chmod +x $stub2/brew $stub2/stow
+_wrangle_fixture_init_repo $fix2 "merge-base-history" main
+_wrangle_fixture_install_scripts $fix2 $repo_root
+_wrangle_fixture_seed_files $fix2 $repo_root empty
+mkdir -p $fix2/home/.config/app
+printf 'a\nb\nc\n' > $fix2/home/.config/app/conf
+git -C $fix2 add -A
+git -C $fix2 commit -q -m seed
+git -C $fix2 checkout -q -b work
+printf 'a\nb\nC\n' > $fix2/home/.config/app/conf
+# A file the branches never shared: created separately on each.
+printf 'theirs\n' > $fix2/home/.config/app/only
+git -C $fix2 add -A
+git -C $fix2 commit -q -m 'work: edits'
+git -C $fix2 checkout -q -b personal main
+printf 'A\nb\nc\n' > $fix2/home/.config/app/conf
+printf 'mine\n' > $fix2/home/.config/app/only
+git -C $fix2 add -A
+git -C $fix2 commit -q -m 'personal: edits'
+
+function _mb_merge2 --inherit-variable fix2 --inherit-variable home2 --inherit-variable stub2
+    begin
+        set -lx HOME $home2
+        set -lx PATH $stub2 $PATH
+        printf $argv[1] | $fix2/scripts/wrangle merge work $argv[2..-1] >$home2/run.log 2>&1
+    end
+    _mb_strip $home2/run.log > $home2/run.txt
+end
+
+_mb_merge2 '' --dry-run
+grep -q 'home/.config/app/conf (differs from source — changed on both sides since both branches last had the same version' $home2/run.txt
+@test "no recorded base: uses the version both histories share" $status -eq 0
+grep -q 'home/.config/app/only (differs from source — first merge of this file' $home2/run.txt
+@test "no shared version: first merge of this file" $status -eq 0
+
+# conf: [m]erge then [y]es; only: [k]eep
+_mb_merge2 'm\ny\nk\n'
+test "$(cat $fix2/home/.config/app/conf | string collect)" = (printf 'A\nb\nC' | string collect)
+@test "history base: [m]erge merges non-overlapping edits cleanly" $status -eq 0
+
+# A file this branch copied whole from the source, then trimmed: the
+# copied version is the shared base, the source hasn't moved since, so
+# the trim stands and nothing is offered.
+git -C $fix2 checkout -q work
+printf 'keep\nwork-only\n' > $fix2/home/.config/app/copied
+git -C $fix2 add -A
+git -C $fix2 commit -q -m 'work: copied'
+git -C $fix2 checkout -q personal
+git -C $fix2 show work:home/.config/app/copied > $fix2/home/.config/app/copied
+git -C $fix2 add -A
+git -C $fix2 commit -q -m 'personal: took work copy whole'
+printf 'keep\n' > $fix2/home/.config/app/copied
+git -C $fix2 commit -q -am 'personal: trim work-only line'
+_mb_merge2 ''
+grep -q 'skipping home/.config/app/copied (unchanged on source since both branches last had the same version)' $home2/run.txt
+@test "history base: a trimmed copy isn't re-offered while the source is unchanged" $status -eq 0
+
+rm -rf $fix2 $home2 $stub2
