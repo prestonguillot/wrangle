@@ -14,8 +14,8 @@
 	ignore = update-index --skip-worktree
 	unignore = update-index --no-skip-worktree
 	ignored = !git ls-files -v | grep "^S"
-	cleanup = !git branch --merged | egrep -v "(^\\*|master|develop|^\\s*keep\\-.*)" | xargs git branch -d
-	cleanup-hard = !git branch | egrep -v "(^\\*|master|develop|^\\s*keep\\-.*)" | xargs git branch -D
+	cleanup = !git branch --merged | egrep -v \"(^\\*|master|develop|^\\s*keep-.*)\" | xargs git branch -d
+	cleanup-hard = !git branch | egrep -v \"(^\\*|master|develop|^\\s*keep-.*)\" | xargs git branch -D
 	cleanup-origin = !git branch -r --merged | grep -v master | grep -v develop | sed 's/origin\\///' | xargs -n 1 git push --delete origin
 	cleanup-origin-hard = !git branch -r | grep -v master | grep -v develop | sed 's/origin\\///' | xargs -n 1 git push --delete origin
 	retag = "!f() { git tag -d ${1}; git push origin :refs/tags/${1}; git tag ${1}; git push origin ${1}; }; f"
@@ -49,3 +49,7 @@
 	cmd = kdiff3 --L1 \"$BASE\" --L2 \"$LOCAL\" --L3 \"$REMOTE\" -o \"$MERGED\" \"$BASE\" \"$LOCAL\" \"$REMOTE\"
 [init]
 	defaultBranch = main
+[includeIf "gitdir:~/development/assets/"]
+	path = ~/.gitconfig-work
+[includeIf "gitdir:~/development/shared/"]
+	path = ~/.gitconfig-work

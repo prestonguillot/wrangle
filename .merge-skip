@@ -28,3 +28,14 @@ brew cask "git-credential-manager"
 brew cask "rancher"
 brew mas "Okta Verify", id: 490179405
 brew brew "stacklok/tap/thv"
+dotfile home/.bash_profile
+dotfile home/.bashrc
+dotfile home/.gitconfig-work
+brew cask "rancher", args: { appdir: "/Applications" }
+brew brew "circleci"
+brew brew "mise"
+brew brew "coursier"
+brew brew "just"
+brew brew "openjdk@17"
+brew brew "openjdk@21"
+brew cask "corretto@8"

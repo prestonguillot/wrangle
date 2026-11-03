@@ -102,3 +102,6 @@ cask "helium-browser"
 cask "gog-galaxy"
 # Network monitoring and troubleshooting tool
 cask "wifiman"
+brew "pinentry-mac"
+cask "alt-tab"
+cask "stacklok/tap/thv", trusted: true

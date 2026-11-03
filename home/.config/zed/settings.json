@@ -25,7 +25,9 @@
   "base_keymap": "JetBrains",
   "text_rendering_mode": "platform_default",
   "ui_font_family": ".ZedSans",
-  "buffer_line_height": "standard",
+  "buffer_line_height": {
+    "custom": 1.5
+  },
   "buffer_font_family": "Monaspace Xenon",
   "telemetry": {
     "diagnostics": false,
@@ -37,10 +39,10 @@
   "on_last_window_closed": "quit_app",
   "when_closing_with_no_tabs": "close_window",
   "theme": "VSCode Dark Modern",
-  "ui_font_size": 16,
+  "ui_font_size": 13,
   "buffer_font_size": 13.0,
-  "format_on_save": "on",
-  "soft_wrap": "preferred_line_length",
+  "format_on_save": "off",
+  "soft_wrap": "none",
   "preferred_line_length": 160,
   "inlay_hints": {
     "enabled": true,
@@ -53,7 +55,48 @@
     "toggle_on_modifiers_press": null
   },
   "minimap": {
-    "show": "always"
+    "show": "always",
+    "max_width_columns": 120
   },
-  "auto_signature_help": true
+  "auto_signature_help": true,
+  "languages": {
+    "Markdown": {
+      "soft_wrap": "editor_width"
+    },
+    "Plain Text": {
+      "soft_wrap": "editor_width"
+    }
+  },
+  "show_whitespaces": "all",
+  "autosave": "on_window_change",
+  "code_lens": "on",
+  "search": {
+    "regex": true
+  },
+  "preview_tabs": {
+    "enabled": false
+  },
+  "tab_bar": {
+    "show_pinned_tabs_in_separate_row": true
+  },
+  "terminal": {
+    "font_family": "Monaspace Xenon",
+    "font_size": 12,
+    "option_as_meta": true
+  },
+  "auto_install_extensions": {
+    "thrift": true,
+    "hocon": true,
+    "proto": true,
+    "terraform": true,
+    "toml": true,
+    "mermaid": true
+  },
+  "lsp": {
+    "metals": {
+      "initialization_options": {
+        "isHttpEnabled": true
+      }
+    }
+  }
 }
