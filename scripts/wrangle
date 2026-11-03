@@ -252,6 +252,14 @@ function _wrangle_help_merge
     echo "with a one-line note. Framework files (scripts/, README.md, etc.) are"
     echo "never touched — those flow via PR → main → `wrangle update`."
     echo ""
+    echo "Univ-vars: a pattern only <branch> tracks prompts to adopt the pattern;"
+    echo "a pattern both branches track prompts when <branch> exports different"
+    echo "values than this machine has live (e.g. a retuned tide prompt)."
+    echo ""
+    echo "Brew: adopting a line that's already satisfied — brew already manages"
+    echo "it, or a cask's app is already on disk — only appends it to the Brewfile."
+    echo "Nothing is installed or taken over."
+    echo ""
     echo "Source resolves to origin/<branch> if it exists; otherwise local."
     echo ""
     echo "With --dry-run, merge walks the same domains and prints the per-item"
@@ -940,6 +948,21 @@ if test "$_subcmd" = merge
         rm -f $tmp
     end
 
+    # Vars matching <pat> in the source's export file whose live value here
+    # is different or missing. One name per line.
+    function _merge_univ_differing --argument-names src_export pat
+        for n in (_wrangle_univ_parse_names $src_export)
+            string match -q $pat $n; or continue
+            set -l src_vals (_wrangle_univ_parse_values $src_export $n)
+            if set -q $n
+                set -l live (string join \x1e -- $$n)
+                set -l want (string join \x1e -- $src_vals)
+                test "$live" = "$want"; and continue
+            end
+            echo $n
+        end
+    end
+
     # "+N −M" from a rendered diff, for the dry-run listing.
     function _merge_diff_counts
         set -l plain (string replace -ra '\e\[[0-9;]*m' '' -- $argv)
@@ -963,6 +986,39 @@ if test "$_subcmd" = merge
         _wrangle_univ_format $tmp/src $names > $tmp/new
         _wrangle_diff_render $tmp/live $tmp/new "universal variables ($pat)" live source
         rm -rf $tmp
+    end
+
+    # Is a Brewfile line already satisfied on this machine? Prints how, and
+    # returns 0 if so:
+    #   installed        brew already manages it (`brew bundle check`)
+    #   <app path>       a cask whose .app is already on disk, put there
+    #                    outside brew (e.g. downloaded from the vendor)
+    #
+    # Adopt used to run `brew bundle install` regardless. For a cask whose
+    # app was already present that meant brew took the app over in place
+    # (bundle passes --adopt) and quit it while doing so — a working app
+    # stopped, for a Brewfile line that needed no install at all.
+    function _merge_brew_present --argument-names line
+        set -l tmp (mktemp)
+        echo $line > $tmp
+        brew bundle check --no-upgrade --file=$tmp >/dev/null 2>&1
+        set -l rv $status
+        rm -f $tmp
+        if test $rv -eq 0
+            echo installed
+            return 0
+        end
+        set -l token (string match -r '^cask "([^"]+)"' -- $line)[2]
+        test -n "$token"; or return 1
+        for app in (brew info --cask $token 2>/dev/null | string match -rg '^(.+\.app) \(App\)$')
+            for dir in /Applications $HOME/Applications
+                if test -e "$dir/$app"
+                    echo "$dir/$app"
+                    return 0
+                end
+            end
+        end
+        return 1
     end
 
     # Reset counters used in summary.
@@ -1105,8 +1161,16 @@ if test "$_subcmd" = merge
             continue
         end
 
+        set -l present (_merge_brew_present $line)
+        set -l note
+        if test "$present" = installed
+            set note " (already installed)"
+        else if test -n "$present"
+            set note " (already on disk, not installed by brew: $present)"
+        end
+
         echo ""
-        echo "    "(_name $line)
+        echo "    "(_name $line)$note
         if test "$_dry_run" = yes
             set brew_total (math $brew_total + 1)
             continue
@@ -1116,6 +1180,20 @@ if test "$_subcmd" = merge
             switch $choice
                 case a A adopt
                     echo $line >> $repo/Brewfile
+                    set _merge_brew_adopted (math $_merge_brew_adopted + 1)
+                    _log_change "adopted brew from $source: $line"
+                    if test "$present" = installed
+                        echo "      $GLYPH_OK added to Brewfile (already installed — nothing to install)"
+                        break
+                    else if test -n "$present"
+                        # Leave the user's app alone. Brew can take it over
+                        # later, on their terms.
+                        set -l token (string match -r '^cask "([^"]+)"' -- $line)[2]
+                        echo "      $GLYPH_OK added to Brewfile; left $present as it is"
+                        echo "      $GLYPH_DIM to have brew manage that copy: brew install --cask --adopt $token"
+                        echo "      $GLYPH_DIM (brew quits the app while it does this)"
+                        break
+                    end
                     # Best-effort install via brew bundle install with a one-line
                     # file (psub turns the echo into a temp file path). Handles
                     # brew/cask/mas/tap/vscode/etc. without parsing line type.
@@ -1125,8 +1203,6 @@ if test "$_subcmd" = merge
                         echo "      $GLYPH_WARN brew bundle install failed (exit $install_rv)"
                         echo "      $GLYPH_DIM the Brewfile entry was appended; run `brew bundle install` to retry"
                     end
-                    set _merge_brew_adopted (math $_merge_brew_adopted + 1)
-                    _log_change "adopted brew from $source: $line"
                     echo "      $GLYPH_OK adopted"
                     break
                 case f F forever
@@ -1279,6 +1355,64 @@ if test "$_subcmd" = merge
         end
         set univ_total (math $univ_total + 1)
     end
+
+    # Patterns both branches already track. The pattern itself is no news,
+    # but the values behind it can be — retuning a tide prompt on one
+    # machine changes tide_* values and never touches .univexport. Merge
+    # used to look only at the pattern lines, so value changes never
+    # crossed over at all.
+    #
+    # Compared against the LIVE shell, since that's what adopting changes
+    # (the export file is regenerated from live afterwards). Add-only like
+    # the rest of merge: vars this machine has that the source doesn't
+    # export are left alone. Not recorded in .merge-skip — like a dotfile
+    # conflict, a value difference re-prompts every run until settled.
+    set -l src_export (mktemp)
+    git show $source:home/.config/fish/exported-univ-vars.fish > $src_export 2>/dev/null
+    for pat in $src_univ_patterns
+        contains -- $pat $cur_univ_patterns; or continue
+        set -l differing (_merge_univ_differing $src_export $pat)
+        test (count $differing) -gt 0; or continue
+
+        echo ""
+        if test "$_dry_run" = yes
+            echo "    "(_name $pat)" ("(count $differing)" var(s) differ from source, "(_merge_diff_counts (_merge_univ_diff $source $pat))")"
+            set univ_total (math $univ_total + 1)
+            continue
+        end
+        echo "    "(_name $pat)" — "(_n (count $differing))" var(s) differ from source: "(string join ", " $differing)
+        set -l prompt "    [a]dopt source values / [k]eep mine / [tab] diff / [s]kip / [q]uit > "
+        while true
+            _wrangle_ask "      " $prompt _merge_univ_diff $source $pat
+            set -l choice $_wrangle_answer
+            switch $choice
+                case a A adopt
+                    for name in $differing
+                        set -l vals (_wrangle_univ_parse_values $src_export $name)
+                        set -U --erase $name 2>/dev/null
+                        set -U $name $vals
+                    end
+                    set _merge_univ_adopted (math $_merge_univ_adopted + 1)
+                    _log_change "adopted univ-var values from $source: $pat ("(string join ", " $differing)")"
+                    echo "      $GLYPH_OK set "(count $differing)" var(s) to the source's values"
+                    break
+                case k K keep
+                    echo "      $GLYPH_OK kept local"
+                    break
+                case s S skip ''
+                    echo "      $GLYPH_DIM skipped (will resurface next merge)"
+                    break
+                case q Q quit
+                    rm -f $src_export
+                    _wrangle_abort quit
+                case '*'
+                    echo "      ? '$choice' — answer a/k/d/s/q"
+            end
+        end
+        set univ_total (math $univ_total + 1)
+    end
+    rm -f $src_export
+
     if test $univ_total -eq 0
         echo "    $GLYPH_OK no univ-var pattern drift to merge"
     end
@@ -1292,7 +1426,7 @@ if test "$_subcmd" = merge
             echo "  $GLYPH_OK nothing to adopt from $source — current branch is already caught up"
         else
             echo "  $GLYPH_DIM would prompt to adopt from "(_name $source)":"
-            echo "    "(_n $dot_total)" dotfile(s), "(_n $brew_total)" brew(s), "(_n $fisher_total)" fisher plugin(s), "(_n $univ_total)" univ-var pattern(s)"
+            echo "    "(_n $dot_total)" dotfile(s), "(_n $brew_total)" brew(s), "(_n $fisher_total)" fisher plugin(s), "(_n $univ_total)" univ-var pattern(s) (new or with changed values)"
             echo ""
             echo "  Run "(_name "wrangle merge $src_arg")" (without --dry-run) to adopt interactively."
         end
@@ -1325,9 +1459,7 @@ if test "$_subcmd" = merge
 
     if test $_merge_univ_adopted -gt 0
         # Regenerate this branch's exported-univ-vars.fish with the new tracked patterns.
-        set -l univ_export_file $repo/.univexport
-        set -l univ_output_file $repo/home/.config/fish/exported-univ-vars.fish
-        _univ_regenerate
+        _wrangle_univ_regenerate $repo/.univexport $repo/home/.config/fish/exported-univ-vars.fish
     end
 
     # ── End: commit if anything was adopted ────────────────────────────

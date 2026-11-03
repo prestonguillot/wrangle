@@ -405,3 +405,126 @@ and grep -qx '      +tide_color\[1\] = new' $home13/merge.txt
 grep -qx '      +tide_extra\[1\] = added' $home13/merge.txt
 @test "merge [d]iff (univ): var new to this machine shows as added" $status -eq 0
 rm -rf $fix13 $home13
+
+# ─── brew [a]dopt: don't install what's already there ──────────────────
+# A brew stub that records its arguments. `bundle check` answers per the
+# BUNDLE_CHECK env var; `info --cask` reports one app artifact.
+
+function _merge_brew_stub --argument-names dir
+    printf '%s\n' '#!/bin/sh' \
+        "echo \"\$*\" >> $dir/brew-calls" \
+        'case "$1 $2" in' \
+        '  "bundle check") exit ${BUNDLE_CHECK:-1} ;;' \
+        '  "info --cask") printf "==> Artifacts\nFooApp.app (App)\n" ;;' \
+        'esac' \
+        'exit 0' > $dir/brew
+    chmod +x $dir/brew
+    printf '#!/bin/sh\nexit 0\n' > $dir/stow
+    chmod +x $dir/stow
+end
+
+# Already managed by brew: appended, not installed.
+set -l f14 (_wrangle_merge_fixture)
+set -l fix14 $f14[1]; set -l home14 $f14[2]
+set -l stub14 (mktemp -d)
+_merge_brew_stub $stub14
+begin
+    set -lx HOME $home14
+    set -lx PATH $stub14 $PATH
+    set -lx BUNDLE_CHECK 0
+    printf 's\na\ns\n' | $fix14/scripts/wrangle merge work >$home14/merge.log 2>&1
+end
+grep -q 'mergiraf' $fix14/Brewfile
+@test "brew adopt (already installed): line appended to Brewfile" $status -eq 0
+not grep -q '^bundle install' $stub14/brew-calls
+@test "brew adopt (already installed): brew bundle install NOT run" $status -eq 0
+grep -q 'already installed' $home14/merge.log
+@test "brew adopt (already installed): says so" $status -eq 0
+rm -rf $fix14 $home14 $stub14
+
+# A cask whose .app is already on disk, put there outside brew: appended,
+# app left alone (no install, so brew can't adopt-and-quit it).
+set -l f15 (_wrangle_merge_fixture)
+set -l fix15 $f15[1]; set -l home15 $f15[2]
+git -C $fix15 checkout -q work
+echo 'cask "foo-app"' >> $fix15/Brewfile
+git -C $fix15 commit -q -am 'work: foo-app cask'
+git -C $fix15 checkout -q personal
+mkdir -p $home15/Applications/FooApp.app
+set -l stub15 (mktemp -d)
+_merge_brew_stub $stub15
+begin
+    set -lx HOME $home15
+    set -lx PATH $stub15 $PATH
+    set -lx BUNDLE_CHECK 1
+    # dotfile s, mergiraf s, foo-app a, fisher s
+    printf 's\ns\na\ns\n' | $fix15/scripts/wrangle merge work >$home15/merge.log 2>&1
+end
+grep -q 'cask "foo-app"' $fix15/Brewfile
+@test "brew adopt (app on disk): line appended to Brewfile" $status -eq 0
+not grep -q '^bundle install' $stub15/brew-calls
+@test "brew adopt (app on disk): brew bundle install NOT run" $status -eq 0
+grep -q "Applications/FooApp.app" $home15/merge.log; and grep -q 'brew install --cask --adopt foo-app' $home15/merge.log
+@test "brew adopt (app on disk): names the app and how to hand it to brew" $status -eq 0
+rm -rf $fix15 $home15 $stub15
+
+# Not present: installed as before.
+set -l f16 (_wrangle_merge_fixture)
+set -l fix16 $f16[1]; set -l home16 $f16[2]
+set -l stub16 (mktemp -d)
+_merge_brew_stub $stub16
+begin
+    set -lx HOME $home16
+    set -lx PATH $stub16 $PATH
+    set -lx BUNDLE_CHECK 1
+    printf 's\na\ns\n' | $fix16/scripts/wrangle merge work >$home16/merge.log 2>&1
+end
+grep -q '^bundle install' $stub16/brew-calls
+@test "brew adopt (not installed): brew bundle install runs" $status -eq 0
+rm -rf $fix16 $home16 $stub16
+
+# ─── univ-vars: value changes under a pattern both branches track ──────
+
+set -l f17 (_wrangle_merge_fixture)
+set -l fix17 $f17[1]; set -l home17 $f17[2]
+echo 'tide_*' >> $fix17/.univexport
+printf '%s\n' 'set -U --erase tide_color' 'set -U tide_color old' \
+    > $fix17/home/.config/fish/exported-univ-vars.fish
+git -C $fix17 add -A
+git -C $fix17 commit -q -m 'personal: track tide_*'
+git -C $fix17 checkout -q work
+echo 'tide_*' >> $fix17/.univexport
+printf '%s\n' 'set -U --erase tide_color' 'set -U tide_color new' \
+    'set -U --erase tide_items' 'set -U tide_items git sbt' \
+    > $fix17/home/.config/fish/exported-univ-vars.fish
+git -C $fix17 add -A
+git -C $fix17 commit -q -m 'work: retune tide'
+git -C $fix17 checkout -q personal
+set -l stub17 (mktemp -d)
+printf '#!/bin/sh\nexit 0\n' > $stub17/brew; printf '#!/bin/sh\nexit 0\n' > $stub17/stow
+chmod +x $stub17/brew $stub17/stow
+begin
+    set -lx HOME $home17
+    set -lx XDG_CONFIG_HOME $home17/.config
+    set -lx PATH $stub17 $PATH
+    # Not --no-config: fish doesn't persist universals under it.
+    fish -c 'set -U tide_color old'
+    $fix17/scripts/wrangle merge work --dry-run </dev/null >$home17/dry.log 2>&1
+    # dotfile s, brew s, fisher s, tide_* values: diff then adopt
+    printf 's\ns\ns\nd\na\n' | $fix17/scripts/wrangle merge work >$home17/merge.log 2>&1
+    set -g _t17_live (fish -c 'echo $tide_color; echo $tide_items')
+end
+string replace -ra '\e(\[[0-9;]*m|\(B)' '' < $home17/dry.log > $home17/dry.txt
+grep -q 'tide_\* (2 var(s) differ from source' $home17/dry.txt
+@test "univ values: dry-run lists the pattern with its changed vars" $status -eq 0
+string replace -ra '\e(\[[0-9;]*m|\(B)' '' < $home17/merge.log > $home17/merge.txt
+grep -qx '      -tide_color\[1\] = old' $home17/merge.txt; and grep -qx '      +tide_color\[1\] = new' $home17/merge.txt
+@test "univ values: diff shows live → source" $status -eq 0
+test "$_t17_live[1]" = new; and test "$_t17_live[2]" = 'git sbt'
+@test "univ values: adopt sets the live universals" $status -eq 0
+grep -qx 'set -U tide_color new' $fix17/home/.config/fish/exported-univ-vars.fish
+and grep -qx 'set -U tide_items git sbt' $fix17/home/.config/fish/exported-univ-vars.fish
+@test "univ values: adopt regenerates the export file" $status -eq 0
+string match -q '*univ-var*' (git -C $fix17 log -1 --pretty=%s personal)
+@test "univ values: adoption is committed" $status -eq 0
+rm -rf $fix17 $home17 $stub17
