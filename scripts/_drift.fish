@@ -280,15 +280,13 @@ function _wrangle_detect_drift --argument-names mode
             continue
         end
         # Prompt + responses sit at 4sp to nest visually under the _show subheader.
-        # [d]iff shows the whole path as added: tracking copies all of it into
+        # [tab] diff shows the whole path as added: tracking copies all of it into
         # the repo, and _show only previews the first few lines.
-        _wrangle_diff_reset
-        set -l prompt "    [t]rack / [d]iff / [i]gnore forever / [s]kip / [q]uit > "
+        set -l prompt "    [t]rack / [tab] diff / [i]gnore forever / [s]kip / [q]uit > "
         while true
-            read -P (_keys $prompt) choice
+            _wrangle_ask "      " $prompt _wrangle_diff_render "" $HOME/$rel $rel repo/home "~"
+            set -l choice $_wrangle_answer
             switch $choice
-                case d D diff
-                    _wrangle_diff_toggle "      " $prompt $choice _wrangle_diff_render "" $HOME/$rel $rel repo/home "~"
                 case t T track
                     _track $rel
                     set -l rv $status
@@ -571,7 +569,7 @@ function _wrangle_detect_drift --argument-names mode
         mv $tmp $univ_output_file
     end
 
-    # [d]iff renderers for the univ-var prompts. `-` is the live shell.
+    # [tab] diff renderers for the univ-var prompts. `-` is the live shell.
     #   conflict: live value vs the repo value [a]pply would set
     #   capture:  nothing vs the lines [t]rack would add to the export file
     function _univ_conflict_diff --argument-names file name
@@ -680,13 +678,11 @@ function _wrangle_detect_drift --argument-names mode
                 echo "    "(_name $name)" — value differs:"
                 echo "      live: "(_dim)(string join " " $live_values)(_rs)
                 echo "      repo: "(_dim)(string join " " $repo_values)(_rs)
-                _wrangle_diff_reset
-                set -l prompt "    [a]pply repo value (overwrite local) / [k]eep local / [d]iff / [s]kip / [q]uit > "
+                set -l prompt "    [a]pply repo value (overwrite local) / [k]eep local / [tab] diff / [s]kip / [q]uit > "
                 while true
-                    read -P (_keys $prompt) choice
+                    _wrangle_ask "      " $prompt _univ_conflict_diff $univ_output_file $name
+                    set -l choice $_wrangle_answer
                     switch $choice
-                        case d D diff
-                            _wrangle_diff_toggle "      " $prompt $choice _univ_conflict_diff $univ_output_file $name
                         case a A apply
                             set -U --erase $name
                             set -U $name $repo_values
@@ -799,13 +795,11 @@ function _wrangle_detect_drift --argument-names mode
             if test "$mode" = report
                 continue
             end
-            _wrangle_diff_reset
-            set -l prompt "    [t]rack pattern / [d]iff / [i]gnore forever / [s]kip / [q]uit > "
+            set -l prompt "    [t]rack pattern / [tab] diff / [i]gnore forever / [s]kip / [q]uit > "
             while true
-                read -P (_keys $prompt) choice
+                _wrangle_ask "      " $prompt _univ_capture_diff $members
+                set -l choice $_wrangle_answer
                 switch $choice
-                    case d D diff
-                        _wrangle_diff_toggle "      " $prompt $choice _univ_capture_diff $members
                     case t T track
                         echo "$prefix*" >> $univ_export_file
                         echo "      $GLYPH_OK added `$prefix*` to .univexport"
@@ -840,13 +834,11 @@ function _wrangle_detect_drift --argument-names mode
             if test "$mode" = report
                 continue
             end
-            _wrangle_diff_reset
-            set -l prompt "    [t]rack exact name / [d]iff / [i]gnore forever / [s]kip / [q]uit > "
+            set -l prompt "    [t]rack exact name / [tab] diff / [i]gnore forever / [s]kip / [q]uit > "
             while true
-                read -P (_keys $prompt) choice
+                _wrangle_ask "      " $prompt _univ_capture_diff $name
+                set -l choice $_wrangle_answer
                 switch $choice
-                    case d D diff
-                        _wrangle_diff_toggle "      " $prompt $choice _univ_capture_diff $name
                     case t T track
                         echo $name >> $univ_export_file
                         echo "      $GLYPH_OK added `$name` to .univexport"

@@ -11,6 +11,8 @@ set -l repo_root (dirname (realpath (status -f)))/..
 source $repo_root/scripts/_univ_parse.fish
 source $repo_root/scripts/_diff_view.fish
 source $repo_root/test/helpers/fixture.fish
+# _keys (prompt key coloring) lives in scripts/wrangle; plain text is enough here.
+function _keys; echo $argv[1]; end
 
 set -l d (mktemp -d)
 printf 'a\n' > $d/old
@@ -76,16 +78,24 @@ test "$out[2]" = '__wrangle_test_live[2] = two'
 @test "univ format (live): unset vars print nothing" (count $out) -eq 2
 set -e __wrangle_test_live
 
-# ─── toggle, not on a terminal: prints the diff every press ─────────────
+# ─── _wrangle_ask, not on a terminal: d prints the diff and asks again ──
 
-_wrangle_diff_reset
-set -l out (_wrangle_diff_toggle "  " "> " d _wrangle_diff_render "" $d/new f a b)
+set -l tmpout (mktemp)
+printf 'd\nk\n' | _wrangle_ask "  " "> " _wrangle_diff_render "" $d/new f a b >$tmpout
+set -l out (cat $tmpout)
 contains -- '  +b' $out
-@test "toggle (no tty): prints the indented diff" $status -eq 0
+@test "ask (no tty): d prints the indented diff" $status -eq 0
+test "$_wrangle_answer" = k
+@test "ask (no tty): the answer after d is returned" $status -eq 0
 
-set -l out (_wrangle_diff_toggle "  " "> " d _wrangle_diff_render $d/old $d/old f a b)
-contains -- '  (no differences)' $out
-@test "toggle (no tty): says so when there is nothing to show" $status -eq 0
+printf 'd\ns\n' | _wrangle_ask "  " "> " _wrangle_diff_render $d/old $d/old f a b >$tmpout
+contains -- '  (no differences)' (cat $tmpout)
+@test "ask (no tty): says so when there is nothing to show" $status -eq 0
+
+printf '' | _wrangle_ask "  " "> " _wrangle_diff_render $d/old $d/new f a b >$tmpout
+test -z "$_wrangle_answer"
+@test "ask (no tty): EOF answers empty (callers treat it as skip)" $status -eq 0
+rm -f $tmpout
 
 rm -rf $d
 
