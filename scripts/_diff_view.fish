@@ -1,4 +1,4 @@
-# _diff_view.fish — the [d]iff option shared by the merge and sync prompts.
+# _diff_view.fish — the [tab] diff option shared by the merge and sync prompts.
 # Sourced by scripts/wrangle (and by test/diff-view.fish). Don't run directly.
 #
 # WHY THIS EXISTS
@@ -10,9 +10,11 @@
 # merge content-conflict prompt had a [d]iff, and it printed the diff for
 # good, pushing the prompt and its context off the screen.
 #
-# [d]iff here is a toggle. The first press expands the diff in line, under
-# the item; the second press collapses it, erasing the diff so the screen
-# reads as it did before. A purely additive change (a new file, a new var)
+# Tab is a toggle. The first press expands the diff in line, under the
+# item; the second collapses it, erasing the diff so the screen reads as it
+# did before. Neither needs Enter, and the prompt is redrawn in place rather
+# than printed again. (`d` + Enter does the same, and is what piped input
+# uses.) A purely additive change (a new file, a new var)
 # shows as all `+` lines, a purely destructive one as all `-` lines — there
 # is no case where the diff is skipped for being "obvious".
 #
@@ -41,12 +43,13 @@
 #       exported-univ-vars.fish-format file.
 #
 #   _wrangle_diff_reset
-#       Forget any open diff. Call once per item, before its prompt loop.
+#       Forget any open diff. _wrangle_ask calls it per prompt.
 #
-#   _wrangle_diff_toggle <indent> <prompt> <answer> <render-command>...
-#       Expand or collapse the diff for the current item. <prompt> and
-#       <answer> are the prompt text and what the user typed, needed to know
-#       how many terminal rows to erase.
+#   _wrangle_ask <indent> <prompt> <render-command>...
+#       Read an answer with Tab bound to expand/collapse the diff that
+#       <render-command> prints. Answer lands in $_wrangle_answer.
+
+# Uses _keys (prompt key coloring) from scripts/wrangle.
 
 set -g _wrangle_diff_rows 0
 
@@ -74,7 +77,11 @@ function _wrangle_diff_render --argument-names old new display old_label new_lab
     end
 
     set -l color never
-    test -t 1; and set color always
+    if set -q _wrangle_diff_color
+        set color $_wrangle_diff_color
+    else if test -t 1
+        set color always
+    end
 
     # The real paths are temp files and absolute repo paths; swap them for
     # the display name so the headers say what the user is deciding about.
@@ -129,20 +136,99 @@ function _wrangle_diff_line_rows --argument-names line cols
     math "ceil($w / $cols)"
 end
 
-function _wrangle_diff_toggle --argument-names indent prompt answer
-    set -l render $argv[4..-1]
+# Prompt for an answer, with the item's diff a keystroke away. Sets the
+# global $_wrangle_answer (the line typed, without the newline) rather than
+# printing it, since the prompt and diff go to stdout too.
+#
+#   _wrangle_ask <indent> <prompt> <render-command>...
+#
+# On a terminal: Tab expands or collapses the diff in place, with no Enter
+# and no fresh prompt line — the one prompt is redrawn below the diff, with
+# whatever was typed so far. `d` + Enter does the same. Other answers are
+# typed and confirmed with Enter as before.
+#
+# Off a terminal (piped input, tests): plain `read`; `d` prints the diff
+# and asks again.
+function _wrangle_ask --argument-names indent prompt
+    set -l render $argv[3..-1]
+    set -g _wrangle_answer ''
+    _wrangle_diff_reset
 
-    if not test -t 1
-        set -l lines ($render)
-        echo ""
-        if test (count $lines) -eq 0
-            echo "$indent(no differences)"
-        else
-            printf "$indent%s\n" $lines
+    if not test -t 0; or not test -t 1
+        while true
+            read -P (_keys $prompt) ans; or return 0
+            if contains -- "$ans" d D diff
+                set -l lines ($render)
+                echo ""
+                if test (count $lines) -eq 0
+                    echo "$indent(no differences)"
+                else
+                    printf "$indent%s\n" $lines
+                end
+                echo ""
+                continue
+            end
+            set -g _wrangle_answer $ans
+            return 0
         end
-        echo ""
-        return
     end
+
+    # Raw-ish mode: one byte at a time, no echo. Signals stay on, so Ctrl-C
+    # still reaches the SIGINT handler, which restores this via
+    # $_wrangle_stty_saved.
+    set -g _wrangle_stty_saved (stty -g </dev/tty)
+    stty -icanon -echo </dev/tty
+
+    set -l buf ''
+    printf '%s' (_keys $prompt)
+    while true
+        # One byte, exactly: `head -c 1` reads a whole buffer from the tty and
+        # keeps the first byte, eating keys typed in quick succession.
+        # `string collect` trims the trailing newline, so Enter reads as ''.
+        set -l k (dd bs=1 count=1 </dev/tty 2>/dev/null | string collect)
+        switch "$k"
+            case \t
+                _wrangle_diff_tty_toggle $indent $prompt "$buf" $render
+            case '' \r
+                if contains -- "$buf" d D diff
+                    # Same as Tab, and the `d` isn't an answer: unprint it
+                    # so the redrawn prompt comes back empty.
+                    printf (string repeat -n (string length -- $buf) '\b \b')
+                    set buf ''
+                    _wrangle_diff_tty_toggle $indent $prompt '' $render
+                    continue
+                end
+                break
+            case \x7f \b
+                if test -n "$buf"
+                    set buf (string sub -e -1 -- $buf)
+                    printf '\b \b'
+                end
+            case \e
+                # Swallow arrow / function-key sequences (ESC [ X, ESC O X)
+                # so their tail bytes don't land in the answer.
+                set -l k2 (dd bs=1 count=1 </dev/tty 2>/dev/null | string collect)
+                contains -- "$k2" '[' O; and dd bs=1 count=1 </dev/tty 2>/dev/null >/dev/null
+            case '*'
+                if string match -qr '^[[:print:]]$' -- "$k"
+                    set buf "$buf$k"
+                    printf '%s' "$k"
+                end
+        end
+    end
+
+    stty $_wrangle_stty_saved </dev/tty
+    set -e _wrangle_stty_saved
+    printf '\n'
+    set -g _wrangle_answer $buf
+end
+
+# Expand or collapse the diff while the prompt is on screen. The cursor is
+# at the end of the prompt line (prompt + what's been typed). The prompt is
+# cleared, the diff printed or erased above where it sat, and the prompt
+# redrawn underneath.
+function _wrangle_diff_tty_toggle --argument-names indent prompt buf
+    set -l render $argv[4..-1]
 
     set -l size (stty size </dev/tty 2>/dev/null | string split ' ')
     set -l term_rows 24
@@ -155,40 +241,41 @@ function _wrangle_diff_toggle --argument-names indent prompt answer
         set cols $size[2]
     end
 
-    # Rows taken by the prompt line the user just answered.
-    set -l answer_rows (_wrangle_diff_line_rows "$prompt$answer" $cols)
+    # Clear the prompt, which may have wrapped.
+    set -l prompt_rows (_wrangle_diff_line_rows "$prompt$buf" $cols)
+    printf '\r'
+    test $prompt_rows -gt 1; and printf '\e[%dA' (math $prompt_rows - 1)
+    printf '\e[J'
 
     if test $_wrangle_diff_rows -gt 0
-        # Collapse: erase the diff, the prompt line that opened it, and the
-        # one just answered. The caller's loop re-prompts on a clean screen.
-        printf '\e[%dF\e[J' (math $_wrangle_diff_rows + $answer_rows)
+        printf '\e[%dF\e[J' $_wrangle_diff_rows
         set -g _wrangle_diff_rows 0
-        return
+    else
+        # Rendered inside a command substitution, where git can't see the
+        # terminal — so say outright that color is wanted.
+        set -g _wrangle_diff_color always
+        set -l lines ($render)
+        set -e _wrangle_diff_color
+        if test (count $lines) -eq 0
+            set lines (set_color brblack)"(no differences)"(set_color normal)
+        end
+
+        # Everything has to stay on screen to be erasable on collapse. If it
+        # won't fit, page it: quitting the pager is the collapse.
+        set -l body_rows 0
+        for l in $lines
+            set body_rows (math $body_rows + (_wrangle_diff_line_rows "$indent$l" $cols))
+        end
+        if test (math $body_rows + 3 + $prompt_rows + 1) -ge $term_rows
+            and command -q less
+            printf '%s\n' $lines | less -R
+        else
+            set lines "" (string replace -r '^' -- "$indent" $lines) "" \
+                "$indent"(set_color brblack)"· tab again to collapse"(set_color normal)
+            printf '%s\n' $lines
+            set -g _wrangle_diff_rows (math $body_rows + 3)
+        end
     end
 
-    set -l lines ($render)
-    if test (count $lines) -eq 0
-        set lines (set_color brblack)"(no differences)"(set_color normal)
-    end
-    set lines "" (string replace -r '^' -- "$indent" $lines) \
-        "" "$indent"(set_color brblack)"· [d] again to collapse"(set_color normal)
-
-    set -l body_rows 0
-    for l in $lines
-        set body_rows (math $body_rows + (_wrangle_diff_line_rows "$l" $cols))
-    end
-
-    # Everything printed plus the next prompt has to stay on screen to be
-    # erasable. If it won't, page it instead.
-    if test (math $answer_rows + $body_rows + $answer_rows + 1) -ge $term_rows
-        and command -q less
-        printf '%s\n' $lines[2..-3] | less -R
-        # Back from the pager: drop the answered prompt line so the re-prompt
-        # sits where it was.
-        printf '\e[%dF\e[J' $answer_rows
-        return
-    end
-
-    printf '%s\n' $lines
-    set -g _wrangle_diff_rows (math $answer_rows + $body_rows)
+    printf '%s%s' (_keys $prompt) $buf
 end
