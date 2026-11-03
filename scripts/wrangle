@@ -38,7 +38,8 @@
 #   [i]gnore         — append to the per-pass skiplist (.dotignore / .brewignore /
 #                      .fisherignore / .univignore); leaves local state alone
 #   [k]eep mine      — keep current branch's value (wrangle merge conflict)
-#   [d]iff           — show the difference (wrangle merge conflict, re-prompts)
+#   [d]iff           — expand the change in line; press again to collapse
+#                      (merge dotfiles + univ-vars, sync dotfiles + univ-vars)
 #   [r]emove         — yoink/drop from the repo
 #   [s]kip           — leave alone; ask again next run
 #   [q]uit
@@ -238,6 +239,10 @@ function _wrangle_help_merge
     echo "doesn't have (or has with different contents), prompts what to do."
     echo ""
     echo "Prompts for new items: [a]dopt / skip [f]orever / [s]kip / [q]uit."
+    echo "  Dotfiles and univ-var patterns also offer [d]iff: it expands what"
+    echo "  adopting would change in line (a new file shows as all added lines);"
+    echo "  press [d] again to collapse it. Diffs too tall for the terminal open"
+    echo "  in less instead — quit it to return to the prompt."
     echo "  `skip [f]orever` appends the item to .merge-skip; future merges"
     echo "  silently skip it. Bypass with --force."
     echo ""
@@ -249,8 +254,9 @@ function _wrangle_help_merge
     echo "Source resolves to origin/<branch> if it exists; otherwise local."
     echo ""
     echo "With --dry-run, merge walks the same domains and prints the per-item"
-    echo "list it would prompt on (new items and content conflicts) plus a count"
-    echo "summary, then stops — no adoptions, no re-stow, no commit."
+    echo "list it would prompt on (new items and content conflicts), each dotfile"
+    echo "and univ-var pattern with a +N −M line count, plus a count summary, then"
+    echo "stops — no adoptions, no re-stow, no commit."
     echo ""
     echo "Options:"
     echo "  -d, --dry-run  preview what would be adopted; change nothing, don't commit"
@@ -407,6 +413,7 @@ source $repo/scripts/_commit_msg.fish    # commit-message builder (plain path)
 source $repo/scripts/_drift.fish         # _wrangle_detect_drift — Passes 5-8
 source $repo/scripts/_nag_state.fish     # pull-nag state file format + path
 source $repo/scripts/_stow_guard.fish    # unstowable-path detection + stow runner
+source $repo/scripts/_diff_view.fish     # [d]iff expand/collapse for merge + sync prompts
 
 # Return the configured machine-branch for this clone, defaulting to `personal`.
 # Inlined (used to live in scripts/_chain.fish, but that file's other helpers
@@ -915,6 +922,42 @@ if test "$_subcmd" = merge
         return 1
     end
 
+    # Render the diff for one dotfile: what this branch has (or nothing) vs
+    # what adopting would write. Used by [d]iff and by the dry-run counts.
+    function _merge_dot_diff --argument-names source path repo
+        set -l tmp (mktemp)
+        git show $source:$path > $tmp 2>/dev/null
+        set -l cur
+        test -f $repo/$path; and set cur $repo/$path
+        _wrangle_diff_render "$cur" $tmp $path mine source
+        rm -f $tmp
+    end
+
+    # "+N −M" from a rendered diff, for the dry-run listing.
+    function _merge_diff_counts
+        set -l plain (string replace -ra '\e\[[0-9;]*m' '' -- $argv)
+        set -l add (string match -r '^\+(?!\+\+ )' -- $plain | count)
+        set -l del (string match -r '^-(?!-- )' -- $plain | count)
+        echo (set_color green)"+$add"(set_color normal)" "(set_color red)"−$del"(set_color normal)
+    end
+
+    # Render the diff for one univ-var pattern: the live values of the vars
+    # it matches in the source's export file vs the values adopting would
+    # set. Vars the source doesn't export are untouched by adopt, so they're
+    # left out.
+    function _merge_univ_diff --argument-names source pat
+        set -l tmp (mktemp -d)
+        git show $source:home/.config/fish/exported-univ-vars.fish > $tmp/src 2>/dev/null
+        set -l names
+        for n in (_wrangle_univ_parse_names $tmp/src)
+            string match -q $pat $n; and set -a names $n
+        end
+        _wrangle_univ_format - $names > $tmp/live
+        _wrangle_univ_format $tmp/src $names > $tmp/new
+        _wrangle_diff_render $tmp/live $tmp/new "universal variables ($pat)" live source
+        rm -rf $tmp
+    end
+
     # Reset counters used in summary.
     set -g _merge_dot_adopted 0
     set -g _merge_brew_adopted 0
@@ -956,17 +999,22 @@ if test "$_subcmd" = merge
         if test -z "$current_blob"
             # New file: prompt to adopt, skip once, or skip forever.
             echo ""
-            echo "    "(_name $path)" (new from source)"
             if test "$_dry_run" = yes
+                echo "    "(_name $path)" (new from source, "(_merge_diff_counts (_merge_dot_diff $source $path $repo))")"
                 set dot_total (math $dot_total + 1)
                 continue
             end
+            echo "    "(_name $path)" (new from source)"
+            _wrangle_diff_reset
+            set -l prompt "    [a]dopt / [d]iff / skip [f]orever / [s]kip / [q]uit > "
             while true
-                read -P (_keys "    [a]dopt / skip [f]orever / [s]kip / [q]uit > ") choice
+                read -P (_keys $prompt) choice
                 switch $choice
+                    case d D diff
+                        _wrangle_diff_toggle "      " $prompt $choice _merge_dot_diff $source $path $repo
                     case a A adopt
                         mkdir -p (dirname $repo/$path)
-                        printf '%s' "$src_blob" > $repo/$path
+                        git show $source:$path > $repo/$path
                         set _merge_dot_adopted (math $_merge_dot_adopted + 1)
                         set _merge_need_restow yes
                         _log_change "adopted dotfile from $source: $rel"
@@ -983,23 +1031,26 @@ if test "$_subcmd" = merge
                     case q Q quit
                         _wrangle_abort quit
                     case '*'
-                        echo "      ? '$choice' — answer a/f/s/q"
+                        echo "      ? '$choice' — answer a/d/f/s/q"
                 end
             end
             set dot_total (math $dot_total + 1)
         else if test "$current_blob" != "$src_blob"
             # Conflict: prompt with 4 options.
             echo ""
-            echo "    "(_name $path)" (differs from source)"
             if test "$_dry_run" = yes
+                echo "    "(_name $path)" (differs from source, "(_merge_diff_counts (_merge_dot_diff $source $path $repo))")"
                 set dot_total (math $dot_total + 1)
                 continue
             end
+            echo "    "(_name $path)" (differs from source)"
+            _wrangle_diff_reset
+            set -l prompt "    [a]dopt source / [k]eep mine / [d]iff / [s]kip / [q]uit > "
             while true
-                read -P (_keys "    [a]dopt source / [k]eep mine / [d]iff / [s]kip / [q]uit > ") choice
+                read -P (_keys $prompt) choice
                 switch $choice
                     case a A adopt
-                        printf '%s' "$src_blob" > $repo/$path
+                        git show $source:$path > $repo/$path
                         set _merge_dot_adopted (math $_merge_dot_adopted + 1)
                         _log_change "adopted dotfile from $source: $rel (overwrote local)"
                         echo "      $GLYPH_OK adopted source's version"
@@ -1008,11 +1059,7 @@ if test "$_subcmd" = merge
                         echo "      $GLYPH_OK kept local"
                         break
                     case d D diff
-                        echo ""
-                        git --no-pager diff --no-index --color=always $repo/$path (printf '%s' "$src_blob" | psub) 2>&1 \
-                            | sed 's|^|      |'
-                        echo ""
-                        # Loop back to re-prompt.
+                        _wrangle_diff_toggle "      " $prompt $choice _merge_dot_diff $source $path $repo
                     case s S skip ''
                         echo "      $GLYPH_DIM skipped (will resurface next merge)"
                         break
@@ -1181,14 +1228,19 @@ if test "$_subcmd" = merge
         end
 
         echo ""
-        echo "    "(_name $pat)" (new pattern from source)"
         if test "$_dry_run" = yes
+            echo "    "(_name $pat)" (new pattern from source, "(_merge_diff_counts (_merge_univ_diff $source $pat))")"
             set univ_total (math $univ_total + 1)
             continue
         end
+        echo "    "(_name $pat)" (new pattern from source)"
+        _wrangle_diff_reset
+        set -l prompt "    [a]dopt (append + apply matching vars) / [d]iff / skip [f]orever / [s]kip / [q]uit > "
         while true
-            read -P (_keys "    [a]dopt (append + apply matching vars) / skip [f]orever / [s]kip / [q]uit > ") choice
+            read -P (_keys $prompt) choice
             switch $choice
+                case d D diff
+                    _wrangle_diff_toggle "      " $prompt $choice _merge_univ_diff $source $pat
                 case a A adopt
                     echo $pat >> $repo/.univexport
                     # Apply matching vars from source's exported file into live shell.
@@ -1221,7 +1273,7 @@ if test "$_subcmd" = merge
                 case q Q quit
                     _wrangle_abort quit
                 case '*'
-                    echo "      ? '$choice' — answer a/f/s/q"
+                    echo "      ? '$choice' — answer a/d/f/s/q"
             end
         end
         set univ_total (math $univ_total + 1)
