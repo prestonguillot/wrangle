@@ -82,3 +82,7 @@ id_*                    # SSH keys via the conventional naming
 .claude.json.tmp*
 
 .gem
+.config/fish/conf.d/fish_frozen_key_bindings.fish
+.config/fish/conf.d/fish_frozen_key_bindings.fish.before-fix
+.vim/after
+.vim/.netrwhist
