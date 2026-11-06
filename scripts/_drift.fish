@@ -43,6 +43,75 @@
 # nothing in report mode, so keeping them out here means status cannot
 # reach them at all — no gate required.
 
+# Untracked entries inside directories home/ already tracks, as absolute
+# paths for the dotfile pass's scan list.
+#
+# The top-level scan only looks at ~/.<name> and ~/.config/<name>. Once
+# ~/.config/fish is tracked, it's never a candidate again — and nothing
+# looked inside it, so a hand-written ~/.config/fish/functions/foo.fish
+# was never offered and never reached another machine. (That's how a tide
+# prompt item lived only on the machine where it was written, while the
+# tide settings naming it synced everywhere and broke the prompt.)
+#
+# Walks every directory under home/ below the top level, and lists what
+# the matching directory in ~ holds that home/ doesn't. Filtered:
+#   - symlinks (stow's own links, or the user's)
+#   - ~ directories that are themselves symlinks (stow folded them; new
+#     files there already land in the repo)
+#   - files fisher installed — fisher owns them and reinstalls them from
+#     fish_plugins; it lists them in the _fisher_*_files universals
+#   - fish_variables — fish's universal-variable store; univ-vars sync
+#     through .univexport instead
+#   - directories with no files in them (nothing to track)
+# A new directory holding any fisher-installed file isn't offered whole —
+# that would move fisher's files into the repo. Its other files are
+# offered one by one instead.
+#
+# .dotignore and stow-hazard checks happen in the caller, same as for the
+# top-level entries.
+function _wrangle_drift_nested_scan --argument-names home_subdir
+    set -l fisher_files
+    for v in (set -U -n | string match '_fisher_*_files')
+        set -a fisher_files (string replace -r '^~' $HOME -- $$v)
+    end
+
+    for d in (find $home_subdir -mindepth 2 -type d 2>/dev/null) \
+             (find $home_subdir -mindepth 1 -maxdepth 1 -type d ! -name .config 2>/dev/null)
+        set -l rel (string replace -- $home_subdir/ '' $d)
+        set -l live $HOME/$rel
+        test -d $live; or continue
+        test -L $live; and continue
+        _wrangle_drift_nested_entries $live $home_subdir $fisher_files
+    end
+end
+
+# One directory's untracked entries, for _wrangle_drift_nested_scan.
+function _wrangle_drift_nested_entries --argument-names live home_subdir
+    set -l fisher_files $argv[3..-1]
+    for e in $live/* $live/.*
+        test -L $e; and continue
+        test -e $e; or continue
+        set -l erel (string replace -- $HOME/ '' $e)
+        test -e $home_subdir/$erel; or test -L $home_subdir/$erel; and continue
+        contains -- $e $fisher_files; and continue
+        test (basename $e) = fish_variables; and continue
+
+        if test -d $e
+            set -l files (find $e -type f 2>/dev/null)
+            test (count $files) -gt 0; or continue
+            set -l has_fisher no
+            for f in $files
+                contains -- $f $fisher_files; and set has_fisher yes; and break
+            end
+            if test "$has_fisher" = yes
+                _wrangle_drift_nested_entries $e $home_subdir $fisher_files
+                continue
+            end
+        end
+        echo $e
+    end
+end
+
 function _wrangle_detect_drift --argument-names mode
     # Reject an unknown or missing mode loudly. Every gate below tests for
     # `report`, so an empty or misspelled $mode would fall through to the
@@ -202,6 +271,9 @@ function _wrangle_detect_drift --argument-names mode
     for f in $HOME/.config/*
         set -a scan $f
     end
+    # Plus new entries inside directories home/ already tracks (see
+    # _wrangle_drift_nested_scan below for why and what's filtered).
+    set -a scan (_wrangle_drift_nested_scan $home_subdir)
 
     set -l candidates
     set -l blocked
@@ -280,8 +352,12 @@ function _wrangle_detect_drift --argument-names mode
             continue
         end
         # Prompt + responses sit at 4sp to nest visually under the _show subheader.
+        # [tab] diff shows the whole path as added: tracking copies all of it into
+        # the repo, and _show only previews the first few lines.
+        set -l prompt "    [t]rack / [tab] diff / [i]gnore forever / [s]kip / [q]uit > "
         while true
-            read -P (_keys "    [t]rack / [i]gnore forever / [s]kip / [q]uit > ") choice
+            _wrangle_ask "      " $prompt _wrangle_diff_render "" $HOME/$rel $rel repo/home "~"
+            set -l choice $_wrangle_answer
             switch $choice
                 case t T track
                     _track $rel
@@ -308,7 +384,7 @@ function _wrangle_detect_drift --argument-names mode
                 case q Q quit
                     _wrangle_abort quit
                 case '*'
-                    echo "      ? '$choice' — answer t/i/s/q"
+                    echo "      ? '$choice' — answer t/d/i/s/q"
             end
         end
 
@@ -526,43 +602,27 @@ function _wrangle_detect_drift --argument-names mode
     # `_univ_prefix` lives in scripts/_univ_helpers.fish (sourced at the top of
     # this script). Sister to scripts/_univ_parse.fish (the export-file parser).
 
-    # Helper: regenerate $univ_output_file from current state + .univexport patterns.
+    # Regenerate $univ_output_file from the live shell + .univexport. The
+    # body lives in scripts/_univ_helpers.fish so `wrangle merge` can call it.
     function _univ_regenerate --inherit-variable univ_export_file --inherit-variable univ_output_file
-        set -l patterns
-        if test -f $univ_export_file
-            set patterns (grep -vE '^\s*(#|$)' $univ_export_file)
-        end
-        if test (count $patterns) -eq 0
-            # Nothing tracked — make sure output file doesn't linger from a previous state.
-            rm -f $univ_output_file
-            return
-        end
-        mkdir -p (dirname $univ_output_file)
+        _wrangle_univ_regenerate $univ_export_file $univ_output_file
+    end
+
+    # [tab] diff renderers for the univ-var prompts. `-` is the live shell.
+    #   conflict: live value vs the repo value [a]pply would set
+    #   capture:  nothing vs the lines [t]rack would add to the export file
+    function _univ_conflict_diff --argument-names file name
+        set -l tmp (mktemp -d)
+        _wrangle_univ_format - $name > $tmp/live
+        _wrangle_univ_format $file $name > $tmp/repo
+        _wrangle_diff_render $tmp/live $tmp/repo "universal variables" live repo
+        rm -rf $tmp
+    end
+    function _univ_capture_diff
         set -l tmp (mktemp)
-        echo "# Auto-generated by wrangle. Edit .univexport (allowlist) and re-run wrangle." > $tmp
-        echo "# Restored automatically by `wrangle sync` (import sub-pass of Pass 7)." >> $tmp
-        echo "" >> $tmp
-        for name in (set -U -L | awk '{print $1}' | sort)
-            set -l matched no
-            for p in $patterns
-                if string match -q $p $name
-                    set matched yes
-                    break
-                end
-            end
-            test "$matched" = yes; or continue
-            # Read the var's values via dereference.
-            set -l values $$name
-            # Skip empty.
-            test (count $values) -eq 0; and continue
-            echo "set -U --erase $name" >> $tmp
-            printf 'set -U %s' $name >> $tmp
-            for v in $values
-                printf ' %s' (string escape -- $v) >> $tmp
-            end
-            printf '\n' >> $tmp
-        end
-        mv $tmp $univ_output_file
+        _wrangle_univ_format - $argv > $tmp
+        _wrangle_diff_render "" $tmp home/.config/fish/exported-univ-vars.fish repo repo
+        rm -f $tmp
     end
 
     # Load allowlist / blocklist patterns once — shared by both sub-passes
@@ -657,8 +717,10 @@ function _wrangle_detect_drift --argument-names mode
                 echo "    "(_name $name)" — value differs:"
                 echo "      live: "(_dim)(string join " " $live_values)(_rs)
                 echo "      repo: "(_dim)(string join " " $repo_values)(_rs)
+                set -l prompt "    [a]pply repo value (overwrite local) / [k]eep local / [tab] diff / [s]kip / [q]uit > "
                 while true
-                    read -P (_keys "    [a]pply repo value (overwrite local) / [k]eep local / [s]kip / [q]uit > ") choice
+                    _wrangle_ask "      " $prompt _univ_conflict_diff $univ_output_file $name
+                    set -l choice $_wrangle_answer
                     switch $choice
                         case a A apply
                             set -U --erase $name
@@ -679,7 +741,7 @@ function _wrangle_detect_drift --argument-names mode
                         case q Q quit
                             _wrangle_abort quit
                         case '*'
-                            echo "      ? '$choice' — answer a/k/s/q"
+                            echo "      ? '$choice' — answer a/k/d/s/q"
                     end
                 end
             end
@@ -772,8 +834,10 @@ function _wrangle_detect_drift --argument-names mode
             if test "$mode" = report
                 continue
             end
+            set -l prompt "    [t]rack pattern / [tab] diff / [i]gnore forever / [s]kip / [q]uit > "
             while true
-                read -P (_keys "    [t]rack pattern / [i]gnore forever / [s]kip / [q]uit > ") choice
+                _wrangle_ask "      " $prompt _univ_capture_diff $members
+                set -l choice $_wrangle_answer
                 switch $choice
                     case t T track
                         echo "$prefix*" >> $univ_export_file
@@ -797,7 +861,7 @@ function _wrangle_detect_drift --argument-names mode
                     case q Q quit
                         _wrangle_abort quit
                     case '*'
-                        echo "      ? '$choice' — answer t/i/s/q"
+                        echo "      ? '$choice' — answer t/d/i/s/q"
                 end
             end
         end
@@ -809,8 +873,10 @@ function _wrangle_detect_drift --argument-names mode
             if test "$mode" = report
                 continue
             end
+            set -l prompt "    [t]rack exact name / [tab] diff / [i]gnore forever / [s]kip / [q]uit > "
             while true
-                read -P (_keys "    [t]rack exact name / [i]gnore forever / [s]kip / [q]uit > ") choice
+                _wrangle_ask "      " $prompt _univ_capture_diff $name
+                set -l choice $_wrangle_answer
                 switch $choice
                     case t T track
                         echo $name >> $univ_export_file
@@ -831,7 +897,7 @@ function _wrangle_detect_drift --argument-names mode
                     case q Q quit
                         _wrangle_abort quit
                     case '*'
-                        echo "      ? '$choice' — answer t/i/s/q"
+                        echo "      ? '$choice' — answer t/d/i/s/q"
                 end
             end
         end
